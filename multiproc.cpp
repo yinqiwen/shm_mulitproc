@@ -390,7 +390,13 @@ namespace shm_multiproc
             	return -1;
             }
         }
-
+        if(WorkerEntryFactory::GetInstance() != 1)
+        {
+        	std::stringstream name_ss;
+        	name_ss << "Only ONE worker entry method expected, but got " << WorkerEntryFactory::GetInstance();
+        	error_reason = name_ss.str();
+        	return -1;
+        }
         entry_func = WorkerEntryFactory::GetInstance().First();
 
         ShmOpenOptions reader_shm_options;
