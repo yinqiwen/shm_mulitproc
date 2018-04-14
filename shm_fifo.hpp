@@ -34,6 +34,7 @@
 #include "common_types.hpp"
 #include <unistd.h>
 #include <functional>
+#include <string.h>
 
 #define ERR_SHMFIFO_OVERLOAD -1000
 
@@ -124,12 +125,12 @@ namespace shm_multiproc
             template<typename T>
             void Offer(T* v)
             {
-                TypeRefItemPtr ptr = New<TypeRefItem>();
+                TypeRefItemPtr ptr = shm_data.New<TypeRefItem>();
                 ptr->destroy = SHMDataDestructor<T>::Free;
                 ptr->val = v;
                 ptr->ref = 1;
                 const char* type_name = T::GetTypeName();
-                ptr->type.assign(type_name);
+                ptr->type.assign(type_name, strlen(type_name));
                 if(0 != Offer(ptr))
                 {
                     printf("###Offer failed\n");
