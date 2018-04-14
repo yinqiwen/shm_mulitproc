@@ -15,7 +15,7 @@ static void start_master(int argc, const char** argv)
     MultiProcOptions options;
     options.home = "./";
     options.worker_home = "./";
-    options.max_waitms = 100000;
+    options.max_waitms = 1500;
 
     WorkerOptions worker;
     worker.name = "test_worker";
@@ -29,7 +29,12 @@ static void start_master(int argc, const char** argv)
 
     options.workers.push_back(worker);
     Master master;
-    master.Start(argc, argv, options);
+    if(0 != master.Start(argc, argv, options))
+    {
+    	 printf("Master start error:%s\n", master.LastError().c_str());
+    	 return;
+    }
+
 
     auto consume = [](const char* type, const void* data)
     {
@@ -71,7 +76,11 @@ static void start_master(int argc, const char** argv)
 static void start_worker(int argc, const char** argv)
 {
     Worker worker;
-    worker.Start(argc, argv);
+    if(0 != worker.Start(argc, argv))
+    {
+    	printf("Worker start error:%s\n", worker.LastError().c_str());
+    	return;
+    }
     while (1)
     {
         worker.Routine(5);

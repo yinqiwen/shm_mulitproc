@@ -102,6 +102,7 @@ namespace shm_multiproc
             WorkerPIDTable pid_workers;
             WokerRestartQueue restart_queue;
             WorkerShmTable worker_shms;
+            std::string error_reason;
 
             void RestartDeadWorkers();
             void CreateWorker(const WorkerOptions& option, int idx);
@@ -121,6 +122,10 @@ namespace shm_multiproc
             int WriteToWorker(const WorkerId& worker,google::protobuf::Message* msg);
             int WriteToWorkers(const std::vector<WorkerId>& workers, google::protobuf::Message* msg);
             int Routine(const ConsumeFunction& func);
+            const std::string& LastError() const
+            {
+            	return error_reason;
+            }
 
     };
     class Worker
@@ -133,10 +138,15 @@ namespace shm_multiproc
             OnMessage* entry_func;
             void* so_handler;
             uint64_t last_check_parent_ms;
+            std::string error_reason;
         public:
             Worker();
             int Start(int argc, const char** argcv);
             int Routine(int maxwait = 5);
+            const std::string& LastError() const
+            {
+            	return error_reason;
+            }
     };
 
 

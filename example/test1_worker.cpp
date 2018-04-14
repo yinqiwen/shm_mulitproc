@@ -21,10 +21,9 @@ DEFINE_ENTRY(test, writer, type, data)
     //std::cout << "Recv From Master:" << *t << std::endl;
     std::cout << "##Writer shm used:" << writer.GetMMData().GetAllocator().used_space() << std::endl;
 
-    mmdata::TypeRefItemPtr ref =  writer.GetMMData().NewTypeRefItem<helloworld::ShmHelloTestData>(helloworld::ShmHelloTestData::GetTypeName());
-    helloworld::ShmHelloTestData* item = ref->Get<helloworld::ShmHelloTestData>();
+    helloworld::ShmHelloTestData* item = writer.New<helloworld::ShmHelloTestData>();
     item->sv.assign("FromWorker");
-    writer.Offer(ref);
+    writer.Offer(item);
     return 0;
 }
 

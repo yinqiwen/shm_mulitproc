@@ -79,11 +79,15 @@ namespace shm_multiproc
         poller.DeleteReadFIFO(w->reader);
         pid_workers.erase(w->pid);
         //workers.erase(w->id);
-        //close(w->reader->GetEventFD());
         //close(w->writer->GetEventFD());
         //delete w->writer;
-        //delete w->reader;
-        //w->reader = NULL;
+        /*
+         * Recreate worker shm next time
+         */
+        close(w->reader->GetEventFD());
+        delete w->reader;
+        delete w->shm;
+        w->reader = NULL;
         //delete w;
     }
     WorkerProcess* Master::GetWorker(pid_t pid)
@@ -149,26 +153,35 @@ namespace shm_multiproc
         id.idx = idx;
         id.name = option.name;
         WorkerProcess* worker = GetWorker(id);
+        bool create_worker = false;
         if(NULL == worker)
         {
+        	create_worker = true;
         	worker = new WorkerProcess;
         	worker->options = option;
         	worker->id = id;
+        	worker->writer = new ShmFIFO(main_shm, args.name);
+        	worker->writer->OpenWrite(option.shm_fifo_maxsize);
+        }
+        if(NULL == worker->shm)
+        {
         	worker->shm = new ShmData;
-            ShmOpenOptions wshm_options;
+        	ShmOpenOptions wshm_options;
         	wshm_options.recreate = true;
         	wshm_options.size = option.shm_size;
         	if (0 != worker->shm->OpenShm(args.write_key_path, wshm_options))
         	{
-        	    printf("OpenShm Error:%s\n", worker->shm->LastError().c_str());
-        	    exit(-1);
+        		  delete worker->shm;
+        		  worker->shm= NULL;
+        	      printf("OpenShm worker Error:%s\n", worker->shm->LastError().c_str());
+        	      if(create_worker)
+        	      {
+        	    	  delete worker->writer;
+        	    	  delete worker;
+        	      }
+        	      return;
         	}
-        	worker->writer = new ShmFIFO(main_shm, args.name);
-        	worker->writer->OpenWrite(option.shm_fifo_maxsize);
-            worker->reader = poller.NewReadFIFO(*(worker->shm), args.name, -1);
-        }else
-        {
-        	poller.AddReadFIFO(worker->reader);
+        	worker->reader = poller.NewReadFIFO(*(worker->shm), args.name, -1);
         }
 
         args.reader_eventfd = worker->writer->GetEventFD();
@@ -210,7 +223,7 @@ namespace shm_multiproc
                     {
                         if(0 != writer->Offer(ref))
                         {
-                            printf("####Writer to worker failed.\n");
+                            //printf("####Writer to worker failed.\n");
                             if(0 == ref->DecRef())
                             {
                                 main_shm.Delete(ref);
@@ -304,12 +317,11 @@ namespace shm_multiproc
         main_options.size = multiproc_options.main_shm_size;
         if (0 != main_shm.OpenShm(multiproc_options.home.c_str(), main_options))
         {
-            printf("###OpenShm:%s Error:%s\n", multiproc_options.home.c_str(), main_shm.LastError().c_str());
+        	error_reason = "Open main shm error:"  + main_shm.LastError();
             return -1;
         }
         poller.Init();
 
-        printf("####Init poller\n");
 
         struct sigaction action;
         action.sa_sigaction = handle_worker_exit;
@@ -344,10 +356,12 @@ namespace shm_multiproc
 
     int Worker::Start(int argc, const char** argv)
     {
+    	error_reason.clear();
         WorkerStartArgs args;
         if (!kcfg::ParseFromJsonFile(argv[argc - 1], args))
         {
-            printf("ParseFromJsonFile Error:%s\n", argv[argc - 1]);
+        	error_reason = "ParseFromJsonFile Error:" + argv[argc - 1];
+            //printf("ParseFromJsonFile Error:%s\n", argv[argc - 1]);
             return -1;
         }
 
@@ -362,8 +376,7 @@ namespace shm_multiproc
             script.SetWorkDir(args.write_key_path);
             if (0 != script.Build(args.so_script.path))
             {
-                printf("Build Error:%s ###%s %s\n", script.GetBuildError().c_str(), argv[argc - 1],
-                        args.so_script.path.c_str());
+            	error_reason = "Build Error:" + script.GetBuildError();
                 return -1;
             }
             so_handler = script.GetHandler();
@@ -371,6 +384,11 @@ namespace shm_multiproc
         else
         {
             so_handler = dlopen(args.so.c_str(), RTLD_NOW);
+            if(NULL == so_handler)
+            {
+            	error_reason.append("dlopen error:").append(dlerror());
+            	return -1;
+            }
         }
 
         entry_func = WorkerEntryFactory::GetInstance().First();
@@ -380,8 +398,8 @@ namespace shm_multiproc
         reader_shm_options.recreate = false;
         if (0 != reader_shm.OpenShm(args.read_key_path, reader_shm_options))
         {
-            printf("Error:%s\n", reader_shm.LastError().c_str());
-            exit(-1);
+        	error_reason = "Open worker read shm  error:" + reader_shm.LastError();
+            return -1;
         }
         reader = new ShmFIFO(reader_shm, args.name, args.reader_eventfd);
         reader->OpenRead();
@@ -392,13 +410,13 @@ namespace shm_multiproc
         wshm_options.size = args.shm_size;
         if (0 != writer_shm.OpenShm(args.write_key_path, wshm_options))
         {
-            printf("Error:%s\n", writer_shm.LastError().c_str());
-            exit(-1);
+        	error_reason = "Open worker write shm  error:" + writer_shm.LastError();
+            return -1;
         }
         writer = new ShmFIFO(writer_shm, args.name, args.writer_eventfd);
         writer->OpenWrite(args.fifo_maxsize, true);
         writer->NotifyReader();
-        printf("Worker shm size:%d\n", writer->Capacity());
+        //printf("Worker shm size:%d\n", writer->Capacity());
         return 0;
     }
 
