@@ -99,6 +99,7 @@ namespace shm_multiproc
                 return eventfd_desc;
             }
             void NotifyReader(int64_t now = 0);
+            void TryNotifyReader();
             void SetMinNotifyIntervalMS(int64_t ms)
             {
                 min_notify_interval_ms = ms;

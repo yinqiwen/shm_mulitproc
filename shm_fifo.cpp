@@ -121,6 +121,14 @@ namespace shm_multiproc
         }
         last_notify_write_ms = now;
     }
+    void ShmFIFO::TryNotifyReader()
+    {
+        int64_t now = mstime();
+        if (0 == min_notify_interval_ms || now - last_notify_write_ms >= min_notify_interval_ms)
+        {
+        	NotifyReader(now);
+        }
+    }
     int ShmFIFO::OpenWrite(int maxsize, bool resize)
     {
         data = shm_data.GetNamingObject<RootObject>(name, true);
@@ -188,11 +196,7 @@ namespace shm_multiproc
         item.status = SHMITEM_STATUS_INIT;
         item.val = val;
         //printf("###[%d] offer offset  %llu  %s\n", getpid(), item.val.get_offset(), item.val->type.c_str());
-        int64_t now = mstime();
-        if (0 == min_notify_interval_ms || now - last_notify_write_ms >= min_notify_interval_ms)
-        {
-        	NotifyReader(now);
-        }
+        TryNotifyReader();
         produce_offset++;
         //printf("Produce at %d\n", produce_offset- 1);
         return 0;

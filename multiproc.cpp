@@ -436,6 +436,7 @@ namespace shm_multiproc
         while (1)
         {
             reader->TakeOne(consume, maxwait);
+            writer->TryNotifyReader();
             uint64_t now = mstime();
             if (now - last_check_parent_ms >= 1000)
             {
