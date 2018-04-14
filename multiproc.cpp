@@ -88,6 +88,7 @@ namespace shm_multiproc
         delete w->reader;
         delete w->shm;
         w->reader = NULL;
+        w->shm = NULL;
         //delete w;
     }
     WorkerProcess* Master::GetWorker(pid_t pid)
@@ -360,8 +361,7 @@ namespace shm_multiproc
         WorkerStartArgs args;
         if (!kcfg::ParseFromJsonFile(argv[argc - 1], args))
         {
-        	error_reason = "ParseFromJsonFile Error:" + argv[argc - 1];
-            //printf("ParseFromJsonFile Error:%s\n", argv[argc - 1]);
+        	error_reason.append("ParseFromJsonFile Error:").append(argv[argc - 1]);
             return -1;
         }
 
