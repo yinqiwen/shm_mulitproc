@@ -111,7 +111,7 @@ namespace shm_multiproc
     {
         return data->size();
     }
-    void ShmFIFO::notifyReader(int64_t now)
+    void ShmFIFO::NotifyReader(int64_t now)
     {
         int64_t e = 1;
         write(eventfd_desc, &e, 8);
@@ -176,7 +176,7 @@ namespace shm_multiproc
         ShmFIFORefItem& item = data->at(produce_offset);
         if (item.status == SHMITEM_STATUS_INIT)
         {
-            notifyReader();
+        	NotifyReader();
             return ERR_SHMFIFO_OVERLOAD;
         }
         if (0 == item.DecRef())
@@ -189,7 +189,7 @@ namespace shm_multiproc
         int64_t now = mstime();
         if (0 == min_notify_interval_ms || now - last_notify_write_ms >= min_notify_interval_ms)
         {
-            notifyReader(now);
+        	NotifyReader(now);
         }
         produce_offset++;
         //printf("Produce at %d\n", produce_offset- 1);

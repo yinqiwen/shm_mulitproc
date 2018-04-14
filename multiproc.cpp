@@ -24,12 +24,13 @@ namespace shm_multiproc
             std::string name;
             int reader_eventfd;
             int writer_eventfd;
+            int64_t shm_size;
             int fifo_maxsize;
             std::string read_key_path;
             std::string write_key_path;
             std::string so;
             WokerSoScript so_script;
-            std::vector<std::string> start_args;KCFG_DEFINE_FIELDS(exe_path, name, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so,so_script,start_args,fifo_maxsize)
+            std::vector<std::string> start_args;KCFG_DEFINE_FIELDS(exe_path, name, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so,so_script,start_args,fifo_maxsize,shm_size)
     };
 
     struct WorkerProcess
@@ -132,6 +133,7 @@ namespace shm_multiproc
         name_ss << option.name << "_" << idx;
         WorkerStartArgs args;
         args.name = name_ss.str();
+        args.shm_size = option.shm_size;
         args.fifo_maxsize = option.shm_fifo_maxsize;
         args.exe_path = current_process;
         args.read_key_path = multiproc_options.home;
@@ -371,6 +373,7 @@ namespace shm_multiproc
         ShmOpenOptions wshm_options;
         wshm_options.readonly = false;
         wshm_options.recreate = false;
+        wshm_options.size = args.shm_size;
         if (0 != writer_shm.OpenShm(args.write_key_path, wshm_options))
         {
             printf("Error:%s\n", writer_shm.LastError().c_str());
@@ -378,6 +381,7 @@ namespace shm_multiproc
         }
         writer = new ShmFIFO(writer_shm, args.name, args.writer_eventfd);
         writer->OpenWrite(args.fifo_maxsize, true);
+        writer->NotifyReader();
         printf("Worker shm size:%d\n", writer->Capacity());
         return 0;
     }
