@@ -1,7 +1,7 @@
 /*
  * test1_woker.cpp
  *
- *  Created on: 2018Äê4ÔÂ12ÈÕ
+ *  Created on: 2018ï¿½ï¿½4ï¿½ï¿½12ï¿½ï¿½
  *      Author: qiyingwang
  */
 #include "worker.hpp"
@@ -21,9 +21,10 @@ DEFINE_ENTRY(test, writer, type, data)
     //std::cout << "Recv From Master:" << *t << std::endl;
     std::cout << "##Writer shm used:" << writer.GetMMData().GetAllocator().used_space() << std::endl;
 
-    helloworld::ShmHelloTestData* item = writer.New<helloworld::ShmHelloTestData>();
+    mmdata::TypeRefItemPtr ref =  writer.GetMMData().NewTypeRefItem<helloworld::ShmHelloTestData>(helloworld::ShmHelloTestData::GetTypeName());
+    helloworld::ShmHelloTestData* item = ref->Get<helloworld::ShmHelloTestData>();
     item->sv.assign("FromWorker");
-    writer.Offer(item);
+    writer.Offer(ref);
     return 0;
 }
 

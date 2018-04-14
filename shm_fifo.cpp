@@ -201,6 +201,14 @@ namespace shm_multiproc
     }
     int ShmFIFO::Take(const ConsumeFunction& cb, int max, int timeout)
     {
+    	if(NULL == data)
+    	{
+    		OpenRead();
+    	}
+    	if(NULL == data)
+    	{
+    		return 0;
+    	}
         int consumeCounter = 0;
         while (1)
         {
@@ -333,11 +341,11 @@ namespace shm_multiproc
     ShmFIFO* ShmFIFOPoller::NewReadFIFO(MMData& mdata, const std::string& name, int evfd)
     {
         ShmFIFO* fifo = new ShmFIFO(mdata, name, evfd);
-        if (-1 == fifo->OpenRead())
-        {
-            delete fifo;
-            return NULL;
-        }
+//        if (-1 == fifo->OpenRead())
+//        {
+//            delete fifo;
+//            return NULL;
+//        }
         auto func = [=]()
         {
             struct epoll_event ev;

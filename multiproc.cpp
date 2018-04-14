@@ -24,11 +24,12 @@ namespace shm_multiproc
             std::string name;
             int reader_eventfd;
             int writer_eventfd;
+            int fifo_maxsize;
             std::string read_key_path;
             std::string write_key_path;
             std::string so;
             WokerSoScript so_script;
-            std::vector<std::string> start_args;KCFG_DEFINE_FIELDS(exe_path, name, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so,so_script,start_args)
+            std::vector<std::string> start_args;KCFG_DEFINE_FIELDS(exe_path, name, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so,so_script,start_args,fifo_maxsize)
     };
 
     struct WorkerProcess
@@ -131,6 +132,7 @@ namespace shm_multiproc
         name_ss << option.name << "_" << idx;
         WorkerStartArgs args;
         args.name = name_ss.str();
+        args.fifo_maxsize = option.shm_fifo_maxsize;
         args.exe_path = current_process;
         args.read_key_path = multiproc_options.home;
         args.write_key_path = multiproc_options.worker_home + "/" + args.name;
@@ -152,13 +154,11 @@ namespace shm_multiproc
             printf("OpenShm Error:%s\n", worker->shm->LastError().c_str());
             exit(-1);
         }
-        ShmFIFO remote_writer(*(worker->shm), args.name);
-        remote_writer.OpenWrite(option.shm_fifo_maxsize);
-        worker->reader = poller.NewReadFIFO(*(worker->shm), args.name, remote_writer.GetEventFD());
+        worker->reader = poller.NewReadFIFO(*(worker->shm), args.name, -1);
         worker->writer = new ShmFIFO(main_shm, args.name);
         worker->writer->OpenWrite(option.shm_fifo_maxsize);
         args.reader_eventfd = worker->writer->GetEventFD();
-        args.writer_eventfd = remote_writer.GetEventFD();
+        args.writer_eventfd = worker->reader->GetEventFD();
         worker->pid = createWorkerProcess(args.write_key_path, args);
 
         pid_workers[worker->pid] = worker;
@@ -377,7 +377,7 @@ namespace shm_multiproc
             exit(-1);
         }
         writer = new ShmFIFO(writer_shm, args.name, args.writer_eventfd);
-        writer->OpenWrite(0, false);
+        writer->OpenWrite(args.fifo_maxsize, true);
         printf("Worker shm size:%d\n", writer->Capacity());
         return 0;
     }
