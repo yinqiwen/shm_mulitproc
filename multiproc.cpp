@@ -78,12 +78,13 @@ namespace shm_multiproc
     {
         poller.DeleteReadFIFO(w->reader);
         pid_workers.erase(w->pid);
-        workers.erase(w->id);
-        close(w->reader->GetEventFD());
-        close(w->writer->GetEventFD());
-        delete w->writer;
-        delete w->reader;
-        delete w;
+        //workers.erase(w->id);
+        //close(w->reader->GetEventFD());
+        //close(w->writer->GetEventFD());
+        //delete w->writer;
+        //delete w->reader;
+        //w->reader = NULL;
+        //delete w;
     }
     WorkerProcess* Master::GetWorker(pid_t pid)
     {
@@ -143,22 +144,33 @@ namespace shm_multiproc
         args.start_args = option.start_args;
         mkdir(multiproc_options.worker_home.c_str(), 0755);
         mkdir(args.write_key_path.c_str(), 0755);
-        WorkerProcess* worker = new WorkerProcess;
-        worker->options = option;
-        worker->id.name = option.name;
-        worker->id.idx = idx;
-        worker->shm = new ShmData;
-        ShmOpenOptions wshm_options;
-        wshm_options.recreate = true;
-        wshm_options.size = option.shm_size;
-        if (0 != worker->shm->OpenShm(args.write_key_path, wshm_options))
+
+        WorkerId id;
+        id.idx = idx;
+        id.name = option.name;
+        WorkerProcess* worker = GetWorker(id);
+        if(NULL == worker)
         {
-            printf("OpenShm Error:%s\n", worker->shm->LastError().c_str());
-            exit(-1);
+        	worker = new WorkerProcess;
+        	worker->options = option;
+        	worker->id = id;
+        	worker->shm = new ShmData;
+            ShmOpenOptions wshm_options;
+        	wshm_options.recreate = true;
+        	wshm_options.size = option.shm_size;
+        	if (0 != worker->shm->OpenShm(args.write_key_path, wshm_options))
+        	{
+        	    printf("OpenShm Error:%s\n", worker->shm->LastError().c_str());
+        	    exit(-1);
+        	}
+        	worker->writer = new ShmFIFO(main_shm, args.name);
+        	worker->writer->OpenWrite(option.shm_fifo_maxsize);
+            worker->reader = poller.NewReadFIFO(*(worker->shm), args.name, -1);
+        }else
+        {
+        	poller.AddReadFIFO(worker->reader);
         }
-        worker->reader = poller.NewReadFIFO(*(worker->shm), args.name, -1);
-        worker->writer = new ShmFIFO(main_shm, args.name);
-        worker->writer->OpenWrite(option.shm_fifo_maxsize);
+
         args.reader_eventfd = worker->writer->GetEventFD();
         args.writer_eventfd = worker->reader->GetEventFD();
         worker->pid = createWorkerProcess(args.write_key_path, args);
@@ -171,7 +183,7 @@ namespace shm_multiproc
         for (const auto& id : workers)
         {
             WorkerProcess* w = GetWorker(id);
-            if (NULL != w)
+            if (NULL != w && NULL != w->writer)
             {
                 writers.push_back(w->writer);
             }
@@ -187,6 +199,10 @@ namespace shm_multiproc
                 {
                     ShmFIFOArrary writers;
                     GetWriters(workers, writers);
+                    if(writers.size() == 0)
+                    {
+                    	return;
+                    }
                     TypeRefItemPtr ref = main_shm.NewTypeRefItem(msg->GetTypeName(), funcs->Create, funcs->Destroy, workers.size());
                     funcs->Read(ref.get()->val.get(), msg);
                     delete msg;

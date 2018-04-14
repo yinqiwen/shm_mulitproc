@@ -142,6 +142,7 @@ namespace shm_multiproc
                 break;
             }
         }
+        printf("####[%d]OpenWrite at %d\n", getpid(), produce_offset);
         return 0;
     }
     int ShmFIFO::OpenRead()
@@ -164,6 +165,7 @@ namespace shm_multiproc
                 break;
             }
         }
+        printf("####[%d]OpenRead at %d\n", getpid(), consume_offset);
         //printf("OpenRead offset at %d %d\n", consume_offset, data->size());
         return 0;
     }
@@ -336,6 +338,27 @@ namespace shm_multiproc
             Write(fifo, val);
         }
         return 0;
+    }
+    void ShmFIFOPoller::AddReadFIFO(ShmFIFO* fifo)
+    {
+//        if (-1 == fifo->OpenRead())
+//        {
+//            delete fifo;
+//            return NULL;
+//        }
+        auto func = [=]()
+        {
+            struct epoll_event ev;
+            ev.events = EPOLLIN;
+            ev.data.ptr = fifo;
+            //make_nonblocking(fifo->GetEventFD());
+                if (epoll_ctl(this->epoll_fd, EPOLL_CTL_ADD, fifo->GetEventFD(), &ev) == -1)
+                {
+                    perror("epoll_ctl: sockfd");
+                    return;
+                }
+            };
+        Wake(func);
     }
 
     ShmFIFO* ShmFIFOPoller::NewReadFIFO(MMData& mdata, const std::string& name, int evfd)

@@ -156,6 +156,7 @@ namespace shm_multiproc
             int Init();
             int Poll(const ConsumeFunction& func, int64_t maxwait_ms = 5);
             int Wake(const WakeFunction& func);
+            void AddReadFIFO(ShmFIFO* fifo);
             ShmFIFO* NewReadFIFO(MMData& mdata, const std::string& name, int evfd);
             int Write(ShmFIFO* write_fifo, TypeRefItemPtr val);
             int WriteAll(const ShmFIFOArrary& fifos, TypeRefItemPtr val);

@@ -15,7 +15,7 @@ static void start_master(int argc, const char** argv)
     MultiProcOptions options;
     options.home = "./";
     options.worker_home = "./";
-    options.max_waitms = 1000;
+    options.max_waitms = 100000;
 
     WorkerOptions worker;
     worker.name = "test_worker";

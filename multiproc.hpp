@@ -1,7 +1,7 @@
 /*
  * multiproc.h
  *
- *  Created on: 2018Äê4ÔÂ11ÈÕ
+ *  Created on: 2018ï¿½ï¿½4ï¿½ï¿½11ï¿½ï¿½
  *      Author: qiyingwang
  */
 
@@ -97,9 +97,11 @@ namespace shm_multiproc
             typedef std::vector<WorkerProcess*> WorkerArray;
             typedef std::map<WorkerId, WorkerProcess*> WorkerNameTable;
             typedef std::vector<WorkerRestartOptions> WokerRestartQueue;
+            typedef std::map<WorkerId, ShmData*> WorkerShmTable;
             WorkerNameTable workers;
             WorkerPIDTable pid_workers;
             WokerRestartQueue restart_queue;
+            WorkerShmTable worker_shms;
 
             void RestartDeadWorkers();
             void CreateWorker(const WorkerOptions& option, int idx);
@@ -107,7 +109,6 @@ namespace shm_multiproc
             WorkerProcess* GetWorker(pid_t pid);
             WorkerProcess* GetWorker(const WorkerId& id);
             void GetWriters(const std::vector<WorkerId>& workers, ShmFIFOArrary& writers);
-
         public:
             ShmData& GetMainShm()
             {
