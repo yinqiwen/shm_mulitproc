@@ -3,6 +3,7 @@
 	<name>shm_mulitproc</name>
 	<comment></comment>
 	<projects>
+		<project>kcfg</project>
 		<project>mmdata</project>
 		<project>shm_proto</project>
 		<project>so_script</project>

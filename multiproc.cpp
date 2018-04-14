@@ -1,7 +1,7 @@
 /*
  * multiproc.cpp
  *
- *  Created on: 2018Äê4ÔÂ11ÈÕ
+ *  Created on: 2018ï¿½ï¿½4ï¿½ï¿½11ï¿½ï¿½
  *      Author: qiyingwang
  */
 #include "multiproc.hpp"
@@ -10,7 +10,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <dlfcn.h>
+#include <signal.h>
 #include <sstream>
+#include <stdlib.h>
 #include "worker_entry.hpp"
 
 namespace shm_multiproc
@@ -218,9 +220,23 @@ namespace shm_multiproc
         return WriteToWorkers(std::vector<WorkerId>(1, worker), msg);
     }
 
+
+    static std::string real_path(const std::string& path)
+    {
+        char buf[PATH_MAX + 1];
+        char* tmp = realpath(path.c_str(), buf);
+        if (NULL != tmp)
+        {
+            return tmp;
+        }
+        return path;
+    }
+
     int Master::UpdateOptions(const MultiProcOptions& options)
     {
         multiproc_options = options;
+        multiproc_options.home = real_path(options.home);
+        multiproc_options.worker_home = real_path(options.worker_home);
         return -1;
     }
 
@@ -258,17 +274,19 @@ namespace shm_multiproc
         poller.Wake(func);
     }
 
+
     int Master::Start(int argc, const char** argv, const MultiProcOptions& options)
     {
         g_master = this;
         current_process = argv[0];
         UpdateOptions(options);
+
         ShmOpenOptions main_options;
         main_options.recreate = true;
-        main_options.size = options.main_shm_size;
-        if (0 != main_shm.OpenShm(options.home.c_str(), main_options))
+        main_options.size = multiproc_options.main_shm_size;
+        if (0 != main_shm.OpenShm(multiproc_options.home.c_str(), main_options))
         {
-            printf("###OpenShm:%s Error:%s\n", options.home.c_str(), main_shm.LastError().c_str());
+            printf("###OpenShm:%s Error:%s\n", multiproc_options.home.c_str(), main_shm.LastError().c_str());
             return -1;
         }
         poller.Init();
@@ -281,7 +299,7 @@ namespace shm_multiproc
         action.sa_flags = SA_SIGINFO;
         sigaction(SIGCHLD, &action, NULL);
 
-        for (const auto& worker : options.workers)
+        for (const auto& worker : multiproc_options.workers)
         {
             for (int i = 0; i < worker.count; i++)
             {

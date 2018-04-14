@@ -1,7 +1,7 @@
 /*
  * test1.cpp
  *
- *  Created on: 2018Äê4ÔÂ12ÈÕ
+ *  Created on: 2018ï¿½ï¿½4ï¿½ï¿½12ï¿½ï¿½
  *      Author: qiyingwang
  */
 #include "multiproc.hpp"
@@ -13,8 +13,8 @@ using namespace shm_multiproc;
 static void start_master(int argc, const char** argv)
 {
     MultiProcOptions options;
-    options.home = "/home/wqy/share/shm_mulitproc";
-    options.worker_home = "/home/wqy/share/shm_mulitproc";
+    options.home = "./";
+    options.worker_home = "./";
     options.max_waitms = 1000;
 
     WorkerOptions worker;
