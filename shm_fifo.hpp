@@ -45,7 +45,8 @@ namespace shm_multiproc
     struct ShmFIFORefItem
     {
             TypeRefItemPtr val;
-            volatile int8_t status;
+            volatile uint8_t status;
+            //volatile int8_t status;
             ShmFIFORefItem();
             const char* GetType()
             {
@@ -74,25 +75,37 @@ namespace shm_multiproc
                 return val.get()->DecRef();
             }
     };
+    struct ShmFIFORingBuffer:public SHMVector<ShmFIFORefItem>::Type
+	{
+    	volatile int64_t consume_idx;
+    	int64_t produce_idx;
+    	int64_t cleaned_idx;
+    	ShmFIFORingBuffer(const CharAllocator& alloc):SHMVector<ShmFIFORefItem>::Type(alloc),consume_idx(0),produce_idx(0),cleaned_idx(0)
+    	{
+
+    	}
+
+	};
     typedef std::function<int(const char*, const void*)> ConsumeFunction;
     class ShmFIFO
     {
         private:
             MMData& shm_data;
             int eventfd_desc;
-            typedef typename SHMVector<ShmFIFORefItem>::Type DataVector;
-            typedef boost::interprocess::offset_ptr<DataVector> DataVectorPtr;
-            DataVector* data;
-            size_t consume_offset;
-            size_t produce_offset;
+            //typedef typename SHMVector<ShmFIFORefItem>::Type DataVector;
+            typedef boost::interprocess::offset_ptr<ShmFIFORingBuffer> ShmFIFORingBufferPtr;
+            ShmFIFORingBuffer* data;
+            //size_t consume_offset;
+            //size_t produce_offset;
             std::string name;
             int64_t last_notify_write_ms;
             int64_t min_notify_interval_ms;
         private:
             int consumeItem(const ConsumeFunction& cb, int& counter, int max);
             void notifyReader(int64_t now = 0);
+            void tryCleanConsumedItems();
         public:
-            typedef DataVector RootObject;
+            typedef ShmFIFORingBuffer RootObject;
             ShmFIFO(MMData& mm, const std::string& nm, int efd = -1);
             int GetEventFD()
             {
@@ -157,8 +170,9 @@ namespace shm_multiproc
             int Init();
             int Poll(const ConsumeFunction& func, int64_t maxwait_ms = 5);
             int Wake(const WakeFunction& func);
-            void AddReadFIFO(ShmFIFO* fifo);
-            ShmFIFO* NewReadFIFO(MMData& mdata, const std::string& name, int evfd);
+            void AtttachReadFIFO(ShmFIFO* fifo);
+            void DettachReadFIFO(ShmFIFO* fifo);
+//            ShmFIFO* NewReadFIFO(MMData& mdata, const std::string& name, int evfd);
             int Write(ShmFIFO* write_fifo, TypeRefItemPtr val);
             int WriteAll(const ShmFIFOArrary& fifos, TypeRefItemPtr val);
             int DeleteReadFIFO(ShmFIFO* f);

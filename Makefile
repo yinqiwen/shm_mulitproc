@@ -48,7 +48,7 @@ CCFLAGS=-Wall -std=gnu99 ${OPT} -fPIC -pedantic -g -D__STDC_FORMAT_MACROS
 LDFLAGS=-g -rdynamic
 
 BOOST_INC?=/usr/include
-INCS=-I./ -I${LIB_PATH}  -I${BOOST_INC} -I../kcfg -I../mmdata/src -I../shm_proto  -I../so_script
+INCS=-I./ -I${LIB_PATH}  -I${BOOST_INC} -I../kcfg -I../mmdata/src -I../shm_proto 
 
 LIBS= ../mmdata/src/libmmdata.a  -lprotobuf  -lpthread -ldl
 
@@ -62,18 +62,21 @@ LIBS= ../mmdata/src/libmmdata.a  -lprotobuf  -lpthread -ldl
 	${CC} -c ${CCFLAGS} ${INCS} $< -o $@
 
 
-COMMON_OBJECTS := multiproc.o shm_fifo.o worker_entry.o worker.o ../shm_proto/shm_proto.o ../so_script/so_script.o
+COMMON_OBJECTS := multiproc.o shm_fifo.o worker_entry.o worker.o ../shm_proto/shm_proto.o 
 
 TEST1OBJ :=  ./example/test1.o ./example/hello.pb.shm.o ./example/hello.pb.o
 
-all:  test1 
+all:  lib_test1_worker.so test1 
+
+lib_test1_worker.so:./example/test1_worker.o
+	${CXX} -shard -shared -rdynamic -o $@ $^
 
 test1:  ${COMMON_OBJECTS}  ${TEST1OBJ}
 	${CXX} -o test1 ${LDFLAGS} ${TEST1OBJ} $(COMMON_OBJECTS) ${LIBS}
 	
 	
 clean_test:
-	rm -f   ${TEST1OBJ} test1
+	rm -f   ${TEST1OBJ} test1 lib_test1_worker.so
 	
 clean: clean_test
 	rm -f  ${COMMON_OBJECTS}

@@ -33,9 +33,9 @@
 #include <sys/select.h>
 #include <fcntl.h>
 
-//#define SHMITEM_STATUS_NOTINIT  -1
 #define SHMITEM_STATUS_INIT      1
 #define SHMITEM_STATUS_CONSUMED  2
+#define SHMITEM_STATUS_CLEANED   3
 
 namespace shm_multiproc
 {
@@ -68,12 +68,12 @@ namespace shm_multiproc
     }
 
     ShmFIFORefItem::ShmFIFORefItem()
-            : status(SHMITEM_STATUS_CONSUMED)
+            : status(SHMITEM_STATUS_CLEANED)
     {
     }
 
     ShmFIFO::ShmFIFO(MMData& mm, const std::string& nm, int efd)
-            : shm_data(mm), eventfd_desc(efd), data(NULL), consume_offset(0), produce_offset(0), name(nm), last_notify_write_ms(
+            : shm_data(mm), eventfd_desc(efd), data(NULL),  name(nm),last_notify_write_ms(
                     0), min_notify_interval_ms(5)
     {
         if (-1 == eventfd_desc)
@@ -84,23 +84,24 @@ namespace shm_multiproc
 
     int ShmFIFO::consumeItem(const ConsumeFunction& cb, int& counter, int max)
     {
-        if (consume_offset >= data->size())
+        if (data->consume_idx >= data->size())
         {
-            consume_offset = 0;
+        	data->consume_idx = 0;
         }
-        if (consume_offset >= data->size())
+        if (data->consume_idx >= data->size())
         {
             return kConsumeFail;
         }
-        ShmFIFORefItem& item = data->at(consume_offset);
+        ShmFIFORefItem& item = data->at(data->consume_idx);
         if (item.status != SHMITEM_STATUS_INIT)
         {
             return kConsumeFail;
         }
+        //data->consumed_seq = item.Seq();
         cb(item.GetType(), item.Get());
         item.status = SHMITEM_STATUS_CONSUMED;
         counter++;
-        consume_offset++;
+        data->consume_idx++;
         if (max >= 0 && counter >= max)
         {
             return kConsumeExit;
@@ -136,21 +137,7 @@ namespace shm_multiproc
         {
             data->resize(maxsize);
         }
-        //printf("####[%d]OpenWrite %d\n", getpid(), data->size());
-        for (size_t i = 0; i < data->size(); i++)
-        {
-            int prev = i - 1;
-            if (prev < 0)
-            {
-                prev = data->size() - 1;
-            }
-            if (data->at(i).status != SHMITEM_STATUS_INIT && data->at(prev).status == SHMITEM_STATUS_INIT)
-            {
-                produce_offset = i;
-                break;
-            }
-        }
-        printf("####[%d]OpenWrite at %d\n", getpid(), produce_offset);
+        printf("####[%d]OpenWrite at %d\n", getpid(), data->produce_idx);
         return 0;
     }
     int ShmFIFO::OpenRead()
@@ -160,45 +147,51 @@ namespace shm_multiproc
         {
             return -1;
         }
-        for (size_t i = 0; i < data->size(); i++)
-        {
-            int prev = i - 1;
-            if (prev < 0)
-            {
-                prev = data->size() - 1;
-            }
-            if (data->at(i).status == SHMITEM_STATUS_INIT && data->at(prev).status != SHMITEM_STATUS_INIT)
-            {
-                consume_offset = i;
-                break;
-            }
-        }
-        printf("####[%d]OpenRead at %d\n", getpid(), consume_offset);
-        //printf("OpenRead offset at %d %d\n", consume_offset, data->size());
+
+        //printf("####[%d]OpenRead at %d\n", getpid(), consume_offset);
+        printf("OpenRead offset at %d %d\n", data->consume_idx, data->size());
         return 0;
+    }
+    void ShmFIFO::tryCleanConsumedItems()
+    {
+    	while(1)
+    	{
+    		if(data->cleaned_idx >= data->size())
+    		{
+    			data->cleaned_idx = 0;
+    		}
+    		ShmFIFORefItem& item = data->at(data->cleaned_idx);
+    		if(item.status != SHMITEM_STATUS_CONSUMED)
+    		{
+    			return;
+    		}
+    		if (0 == item.DecRef())
+    		{
+    		    shm_data.Delete(item.val);
+    		}
+    		item.status = SHMITEM_STATUS_CLEANED;
+    		data->cleaned_idx++;
+    	}
     }
     int ShmFIFO::Offer(TypeRefItemPtr val)
     {
-        if (produce_offset >= data->size())
+    	tryCleanConsumedItems();
+        if (data->produce_idx >= data->size())
         {
-            produce_offset = 0;
+        	data->produce_idx = 0;
         }
-        ShmFIFORefItem& item = data->at(produce_offset);
-        if (item.status == SHMITEM_STATUS_INIT)
+        ShmFIFORefItem& item = data->at(data->produce_idx);
+        if (item.status != SHMITEM_STATUS_CLEANED)
         {
         	NotifyReader();
             return ERR_SHMFIFO_OVERLOAD;
-        }
-        if (0 == item.DecRef())
-        {
-            shm_data.Delete(item.val);
         }
         item.status = SHMITEM_STATUS_INIT;
         item.val = val;
         //printf("###[%d] offer offset  %llu  %s\n", getpid(), item.val.get_offset(), item.val->type.c_str());
         TryNotifyReader();
-        produce_offset++;
-        //printf("Produce at %d\n", produce_offset- 1);
+        data->produce_idx++;
+
         return 0;
     }
     int ShmFIFO::TakeOne(const ConsumeFunction& cb, int timeout)
@@ -343,57 +336,26 @@ namespace shm_multiproc
         }
         return 0;
     }
-    void ShmFIFOPoller::AddReadFIFO(ShmFIFO* fifo)
+
+    void ShmFIFOPoller::AtttachReadFIFO(ShmFIFO* fifo)
     {
-//        if (-1 == fifo->OpenRead())
-//        {
-//            delete fifo;
-//            return NULL;
-//        }
         auto func = [=]()
         {
             struct epoll_event ev;
             ev.events = EPOLLIN;
             ev.data.ptr = fifo;
-            //make_nonblocking(fifo->GetEventFD());
-                if (epoll_ctl(this->epoll_fd, EPOLL_CTL_ADD, fifo->GetEventFD(), &ev) == -1)
-                {
+            if (epoll_ctl(this->epoll_fd, EPOLL_CTL_ADD, fifo->GetEventFD(), &ev) == -1)
+            {
                     perror("epoll_ctl: sockfd");
-                    return;
-                }
-            };
+            }
+        };
         Wake(func);
+    }
+    void ShmFIFOPoller::DettachReadFIFO(ShmFIFO* fifo)
+    {
+    	 epoll_ctl(this->epoll_fd, EPOLL_CTL_DEL, fifo->GetEventFD(), NULL);
     }
 
-    ShmFIFO* ShmFIFOPoller::NewReadFIFO(MMData& mdata, const std::string& name, int evfd)
-    {
-        ShmFIFO* fifo = new ShmFIFO(mdata, name, evfd);
-//        if (-1 == fifo->OpenRead())
-//        {
-//            delete fifo;
-//            return NULL;
-//        }
-        auto func = [=]()
-        {
-            struct epoll_event ev;
-            ev.events = EPOLLIN;
-            ev.data.ptr = fifo;
-            //make_nonblocking(fifo->GetEventFD());
-                if (epoll_ctl(this->epoll_fd, EPOLL_CTL_ADD, fifo->GetEventFD(), &ev) == -1)
-                {
-                    perror("epoll_ctl: sockfd");
-                    return;
-                }
-            };
-        Wake(func);
-        return fifo;
-    }
-    int ShmFIFOPoller::DeleteReadFIFO(ShmFIFO* fifo)
-    {
-        epoll_ctl(this->epoll_fd, EPOLL_CTL_DEL, fifo->GetEventFD(), NULL);
-        //delete fifo;
-        return 0;
-    }
 
     int ShmFIFOPoller::Poll(const ConsumeFunction& func, int64_t maxwait_ms)
     {

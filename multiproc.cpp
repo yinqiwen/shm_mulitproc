@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <sstream>
 #include <stdlib.h>
+#include <dirent.h>
 #include "worker_entry.hpp"
 
 namespace shm_multiproc
@@ -28,9 +29,8 @@ namespace shm_multiproc
             int fifo_maxsize;
             std::string read_key_path;
             std::string write_key_path;
-            std::string so;
-            WokerSoScript so_script;
-            std::vector<std::string> start_args;KCFG_DEFINE_FIELDS(exe_path, name, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so,so_script,start_args,fifo_maxsize,shm_size)
+            std::string so_home;
+            std::vector<std::string> start_args;KCFG_DEFINE_FIELDS(exe_path, name, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so_home,start_args,fifo_maxsize,shm_size)
     };
 
     struct WorkerProcess
@@ -73,14 +73,64 @@ namespace shm_multiproc
         }
         return pid;
     }
+    static bool has_suffix(const std::string& str, const std::string& suffix)
+    {
+        if (str.size() < suffix.size())
+        {
+            return false;
+        }
+        return str.rfind(suffix) == str.size() - suffix.size();
+    }
+    static int list_solibs(const std::string& path, std::vector<std::string>& libs, std::string& latest_lib)
+    {
+        struct stat buf;
+        int ret = stat(path.c_str(), &buf);
+        time_t max_last_modtime = 0;
+        if (0 == ret)
+        {
+            if (S_ISDIR(buf.st_mode))
+            {
+                DIR* dir = opendir(path.c_str());
+                if (NULL != dir)
+                {
+                    struct dirent * ptr;
+                    while ((ptr = readdir(dir)) != NULL)
+                    {
+                        if (!strcmp(ptr->d_name, ".") || !strcmp(ptr->d_name, ".."))
+                        {
+                            continue;
+                        }
+                        std::string file_path = path;
+                        file_path.append("/").append(ptr->d_name);
+                        memset(&buf, 0, sizeof(buf));
+                        ret = stat(file_path.c_str(), &buf);
+                        if (ret == 0 && S_ISREG(buf.st_mode) && has_suffix(file_path, ".so"))
+                        {
+                        	libs.push_back(file_path);
+                        	int64_t modtime = buf.st_mtime;
+                        	if(modtime > max_last_modtime)
+                        	{
+                        		max_last_modtime = modtime;
+                        		latest_lib = file_path;
+                        	}
+                        }
+                    }
+                    closedir(dir);
+                    return 0;
+                }
+            }
+        }
+        return -1;
+    }
+    Master::Master():last_check_restart_ms(0)
+    {
+
+    }
 
     void Master::DestoryWorker(WorkerProcess* w)
     {
-        poller.DeleteReadFIFO(w->reader);
+        poller.DettachReadFIFO(w->reader);
         pid_workers.erase(w->pid);
-        //workers.erase(w->id);
-        //close(w->writer->GetEventFD());
-        //delete w->writer;
         /*
          * Recreate worker shm next time
          */
@@ -110,8 +160,14 @@ namespace shm_multiproc
         return NULL;
     }
 
-    void Master::RestartDeadWorkers()
+    void Master::RestartWorkers()
     {
+    	uint64_t now = mstime();
+    	if(now - last_check_restart_ms < 1000)
+    	{
+    		return;
+    	}
+    	last_check_restart_ms = now;
         if (!restart_queue.empty())
         {
             WokerRestartQueue next_queue;
@@ -131,6 +187,19 @@ namespace shm_multiproc
                 restart_queue = next_queue;
             }
         }
+        for (const auto& worker : multiproc_options.workers)
+        {
+            for (int i = 0; i < worker.count; i++)
+            {
+            	WorkerId id;
+                id.name = worker.name;
+                id.idx = i;
+                if(NULL == GetWorker(id))
+                {
+                	CreateWorker(worker, i);
+                }
+            }
+        }
     }
 
     void Master::CreateWorker(const WorkerOptions& option, int idx)
@@ -144,8 +213,7 @@ namespace shm_multiproc
         args.exe_path = current_process;
         args.read_key_path = multiproc_options.home;
         args.write_key_path = multiproc_options.worker_home + "/" + args.name;
-        args.so = option.so;
-        args.so_script = option.so_script;
+        args.so_home = option.so_home;
         args.start_args = option.start_args;
         mkdir(multiproc_options.worker_home.c_str(), 0755);
         mkdir(args.write_key_path.c_str(), 0755);
@@ -182,7 +250,8 @@ namespace shm_multiproc
         	      }
         	      return;
         	}
-        	worker->reader = poller.NewReadFIFO(*(worker->shm), args.name, -1);
+        	worker->reader = new ShmFIFO(*(worker->shm), args.name);
+        	poller.AtttachReadFIFO(worker->reader);
         }
 
         args.reader_eventfd = worker->writer->GetEventFD();
@@ -342,16 +411,41 @@ namespace shm_multiproc
     int Master::Routine(const ConsumeFunction& func)
     {
         int n = poller.Poll(func, multiproc_options.max_waitms);
-        if (0 == n)
-        {
-            RestartDeadWorkers();
-        }
+        RestartWorkers();
         return n;
     }
 
     Worker::Worker()
-            : reader(NULL), writer(NULL), entry_func(NULL), so_handler(NULL), last_check_parent_ms(0)
+            : reader(NULL), writer(NULL), entry_func(NULL), so_handler(NULL), last_check_parent_ms(0),last_check_so(0)
     {
+
+    }
+    void Worker::CheckParent(uint64_t now)
+    {
+        if (now - last_check_parent_ms >= 1000)
+        {
+            last_check_parent_ms = now;
+            if (getppid() == 1)
+            {
+            	fprintf(stderr, "Exit since parent exit.\n");
+                exit(1);
+            }
+        }
+    }
+    void Worker::CheckLatestLib(uint64_t now)
+    {
+        if (now - last_check_so >= 5000)
+        {
+        	last_check_so = now;
+            std::vector<std::string> libs;
+            std::string latest_so;
+            list_solibs(so_home,libs, latest_so);
+            if(latest_so != loaded_so)
+            {
+            	fprintf(stderr, "Exit since loaded so is not latest so.\n");
+            	exit(1);
+            }
+        }
 
     }
 
@@ -364,32 +458,27 @@ namespace shm_multiproc
         	error_reason.append("ParseFromJsonFile Error:").append(argv[argc - 1]);
             return -1;
         }
+        if(args.so_home.empty())
+        {
+        	return -1;
+        }
+        so_home = args.so_home;
+        std::vector<std::string> libs;
+        std::string latest_so;
+        list_solibs(args.so_home,libs, latest_so);
+        if(latest_so.empty())
+        {
+        	error_reason.append("No so found in so_home:").append(dlerror());
+        	return -1;
+        }
 
-        if (args.so.empty())
+        so_handler = dlopen(latest_so.c_str(), RTLD_NOW);
+        if(NULL == so_handler)
         {
-            so_script::Script script(false);
-            script.AddCompileFlag(args.so_script.compiler_flag);
-            for (const auto& inc : args.so_script.incs)
-            {
-                script.AddInclude(inc);
-            }
-            script.SetWorkDir(args.write_key_path);
-            if (0 != script.Build(args.so_script.path))
-            {
-            	error_reason = "Build Error:" + script.GetBuildError();
-                return -1;
-            }
-            so_handler = script.GetHandler();
+             error_reason.append("dlopen error:").append(dlerror());
+             return -1;
         }
-        else
-        {
-            so_handler = dlopen(args.so.c_str(), RTLD_NOW);
-            if(NULL == so_handler)
-            {
-            	error_reason.append("dlopen error:").append(dlerror());
-            	return -1;
-            }
-        }
+        loaded_so = latest_so;
         if(WorkerEntryFactory::GetInstance().Size() != 1)
         {
         	std::stringstream name_ss;
@@ -433,20 +522,11 @@ namespace shm_multiproc
             entry_func(*writer, type, data);
             return 0;
         };
-        while (1)
-        {
-            reader->TakeOne(consume, maxwait);
-            writer->TryNotifyReader();
-            uint64_t now = mstime();
-            if (now - last_check_parent_ms >= 1000)
-            {
-                last_check_parent_ms = now;
-                if (getppid() == 1)
-                {
-                    exit(1);
-                }
-            }
-        }
+        reader->TakeOne(consume, maxwait);
+        writer->TryNotifyReader();
+        uint64_t now = mstime();
+        CheckParent(now);
+        CheckLatestLib(now);
         return 0;
     }
 }

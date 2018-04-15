@@ -20,12 +20,8 @@ static void start_master(int argc, const char** argv)
     WorkerOptions worker;
     worker.name = "test_worker";
     worker.count = 2;
-    worker.shm_fifo_maxsize = 20;
-    worker.so_script.compiler_flag = "-std=c++11";
-    worker.so_script.incs.push_back("./");
-    worker.so_script.incs.push_back("../mmdata/src");
-    worker.so_script.incs.push_back("../shm_proto");
-    worker.so_script.path = "./example/test1_worker.cpp";
+    worker.shm_fifo_maxsize = 10000;
+    worker.so_home = "./";
 
     options.workers.push_back(worker);
     Master master;

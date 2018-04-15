@@ -16,17 +16,9 @@
 #include "shm_fifo.hpp"
 #include "kcfg.hpp"
 #include "worker.hpp"
-#include "so_script.hpp"
 
 namespace shm_multiproc
 {
-    struct WokerSoScript
-    {
-            std::string path;
-            std::string compiler_flag;
-            std::vector<std::string> incs;
-            KCFG_DEFINE_FIELDS(path, compiler_flag, incs)
-    };
 
     struct WorkerOptions
     {
@@ -35,8 +27,7 @@ namespace shm_multiproc
             int shm_size;
             int shm_fifo_maxsize;
             std::vector<std::string> start_args;
-            WokerSoScript so_script;
-            std::string so;
+            std::string so_home;
 
             WorkerOptions()
                     : count(1), shm_size(10 * 1024 * 1024), shm_fifo_maxsize(100000)
@@ -103,14 +94,16 @@ namespace shm_multiproc
             WokerRestartQueue restart_queue;
             WorkerShmTable worker_shms;
             std::string error_reason;
+            uint64_t last_check_restart_ms;
 
-            void RestartDeadWorkers();
+            void RestartWorkers();
             void CreateWorker(const WorkerOptions& option, int idx);
             void DestoryWorker(WorkerProcess* w);
             WorkerProcess* GetWorker(pid_t pid);
             WorkerProcess* GetWorker(const WorkerId& id);
             void GetWriters(const std::vector<WorkerId>& workers, ShmFIFOArrary& writers);
         public:
+            Master();
             ShmData& GetMainShm()
             {
                 return main_shm;
@@ -138,7 +131,12 @@ namespace shm_multiproc
             OnMessage* entry_func;
             void* so_handler;
             uint64_t last_check_parent_ms;
+            uint64_t last_check_so;
             std::string error_reason;
+            std::string so_home;
+            std::string loaded_so;
+            void CheckParent(uint64_t now);
+            void CheckLatestLib(uint64_t now);
         public:
             Worker();
             int Start(int argc, const char** argcv);
