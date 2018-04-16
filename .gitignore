@@ -1,0 +1,16 @@
+*.o
+*.so
+*.a
+/.svn
+/.libs
+*.bak
+snappy-*/
+gperftools-*/
+jemalloc-*/
+leveldb-*/
+/Debug
+testdb/
+~*
+.kv_engine
+core
+a.out
