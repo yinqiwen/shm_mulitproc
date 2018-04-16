@@ -10,6 +10,7 @@ A C++ multi-processing framework lib.
 
 - [mmdata](https://github.com/yinqiwen/mmdata)
 - [shm_proto](https://github.com/yinqiwen/shm_proto)
+- [kcfg](https://github.com/yinqiwen/kcfg)
 
 
 ## Example
