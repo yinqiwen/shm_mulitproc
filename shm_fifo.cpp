@@ -137,7 +137,7 @@ namespace shm_multiproc
         {
             data->resize(maxsize);
         }
-        printf("####[%d]OpenWrite at %d\n", getpid(), data->produce_idx);
+        //printf("####[%d]OpenWrite at %d\n", getpid(), data->produce_idx);
         return 0;
     }
     int ShmFIFO::OpenRead()
@@ -147,9 +147,7 @@ namespace shm_multiproc
         {
             return -1;
         }
-
-        //printf("####[%d]OpenRead at %d\n", getpid(), consume_offset);
-        printf("OpenRead offset at %d %d\n", data->consume_idx, data->size());
+        //printf("OpenRead offset at %d %d\n", data->consume_idx, data->size());
         return 0;
     }
     void ShmFIFO::tryCleanConsumedItems()

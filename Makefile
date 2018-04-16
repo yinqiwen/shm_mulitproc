@@ -69,7 +69,7 @@ TEST1OBJ :=  ./example/test1.o ./example/hello.pb.shm.o ./example/hello.pb.o
 all:  lib_test1_worker.so test1 
 
 lib_test1_worker.so:./example/test1_worker.o
-	${CXX} -shard -shared -rdynamic -o $@ $^
+	${CXX}  -shared -rdynamic -o $@ $^
 
 test1:  ${COMMON_OBJECTS}  ${TEST1OBJ}
 	${CXX} -o test1 ${LDFLAGS} ${TEST1OBJ} $(COMMON_OBJECTS) ${LIBS}

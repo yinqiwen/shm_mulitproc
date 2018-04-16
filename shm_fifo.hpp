@@ -77,9 +77,9 @@ namespace shm_multiproc
     };
     struct ShmFIFORingBuffer:public SHMVector<ShmFIFORefItem>::Type
 	{
-    	volatile int64_t consume_idx;
-    	int64_t produce_idx;
-    	int64_t cleaned_idx;
+    	volatile size_t consume_idx;
+    	size_t produce_idx;
+    	size_t cleaned_idx;
     	ShmFIFORingBuffer(const CharAllocator& alloc):SHMVector<ShmFIFORefItem>::Type(alloc),consume_idx(0),produce_idx(0),cleaned_idx(0)
     	{
 
