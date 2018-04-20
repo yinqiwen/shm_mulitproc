@@ -28,6 +28,7 @@
  */
 #include "multiproc.hpp"
 #include "shm_proto.hpp"
+#include "worker_entry.hpp"
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -36,7 +37,6 @@
 #include <sstream>
 #include <stdlib.h>
 #include <dirent.h>
-#include "worker_entry.hpp"
 
 namespace shm_multiproc
 {
@@ -45,6 +45,8 @@ namespace shm_multiproc
     {
             std::string exe_path;
             std::string name;
+            int idx;
+            std::string name_idx;
             int reader_eventfd;
             int writer_eventfd;
             int64_t shm_size;
@@ -52,7 +54,7 @@ namespace shm_multiproc
             std::string read_key_path;
             std::string write_key_path;
             std::string so_home;
-            std::vector<std::string> start_args;KCFG_DEFINE_FIELDS(exe_path, name, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so_home,start_args,fifo_maxsize,shm_size)
+            ;KCFG_DEFINE_FIELDS(exe_path, name,idx, name_idx, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so_home,fifo_maxsize,shm_size)
     };
 
     struct WorkerProcess
@@ -69,7 +71,8 @@ namespace shm_multiproc
             }
     };
 
-    static pid_t createWorkerProcess(const std::string& dir, const WorkerStartArgs& args)
+    static pid_t createWorkerProcess(const std::string& dir, const WorkerStartArgs& args,
+            const std::vector<std::string>& cmd_args, const std::vector<std::string>& envs)
     {
         pid_t pid = fork();
         if (0 == pid)
@@ -77,15 +80,22 @@ namespace shm_multiproc
             std::string confile = dir + "/" + args.name + ".json";
             kcfg::WriteToJsonFile(args, confile);
 
-            char* start_args[args.start_args.size() + 3];
+            char* start_args[cmd_args.size() + 3];
             start_args[0] = (char*) (args.exe_path.c_str());
-            for (size_t i = 0; i < args.start_args.size(); i++)
+            for (size_t i = 0; i < cmd_args.size(); i++)
             {
-                start_args[i + 1] = (char*) (args.start_args[i].c_str());
+                start_args[i + 1] = (char*) (cmd_args[i].c_str());
             }
-            start_args[args.start_args.size() + 1] = (char*) (confile.c_str());
-            start_args[args.start_args.size() + 2] = NULL;
-            int ret = execv(args.exe_path.c_str(), start_args);
+            start_args[cmd_args.size() + 1] = (char*) (confile.c_str());
+            start_args[cmd_args.size() + 2] = NULL;
+
+            char* start_envs[envs.size() + 1];
+            for (size_t i = 0; i < envs.size(); i++)
+            {
+                start_envs[i] = (char*) (envs[i].c_str());
+            }
+            start_envs[envs.size()] = NULL;
+            int ret = execvpe(args.exe_path.c_str(), start_args, start_envs);
             if (0 != ret)
             {
                 int err = errno;
@@ -128,13 +138,13 @@ namespace shm_multiproc
                         ret = stat(file_path.c_str(), &buf);
                         if (ret == 0 && S_ISREG(buf.st_mode) && has_suffix(file_path, ".so"))
                         {
-                        	libs.push_back(file_path);
-                        	int64_t modtime = buf.st_mtime;
-                        	if(modtime > max_last_modtime)
-                        	{
-                        		max_last_modtime = modtime;
-                        		latest_lib = file_path;
-                        	}
+                            libs.push_back(file_path);
+                            int64_t modtime = buf.st_mtime;
+                            if (modtime > max_last_modtime)
+                            {
+                                max_last_modtime = modtime;
+                                latest_lib = file_path;
+                            }
                         }
                     }
                     closedir(dir);
@@ -144,7 +154,8 @@ namespace shm_multiproc
         }
         return -1;
     }
-    Master::Master():last_check_restart_ms(0)
+    Master::Master()
+            : last_check_restart_ms(0)
     {
 
     }
@@ -184,12 +195,12 @@ namespace shm_multiproc
 
     void Master::RestartWorkers()
     {
-    	uint64_t now = mstime();
-    	if(now - last_check_restart_ms < 1000)
-    	{
-    		return;
-    	}
-    	last_check_restart_ms = now;
+        uint64_t now = mstime();
+        if (now - last_check_restart_ms < 1000)
+        {
+            return;
+        }
+        last_check_restart_ms = now;
         if (!restart_queue.empty())
         {
             WokerRestartQueue next_queue;
@@ -213,12 +224,12 @@ namespace shm_multiproc
         {
             for (int i = 0; i < worker.count; i++)
             {
-            	WorkerId id;
+                WorkerId id;
                 id.name = worker.name;
                 id.idx = i;
-                if(NULL == GetWorker(id))
+                if (NULL == GetWorker(id))
                 {
-                	CreateWorker(worker, i);
+                    CreateWorker(worker, i);
                 }
             }
         }
@@ -228,15 +239,17 @@ namespace shm_multiproc
     {
         std::stringstream name_ss;
         name_ss << option.name << "_" << idx;
+
         WorkerStartArgs args;
-        args.name = name_ss.str();
+        args.name = option.name;
+        args.name_idx = name_ss.str();
+        args.idx = idx;
         args.shm_size = option.shm_size;
         args.fifo_maxsize = option.shm_fifo_maxsize;
         args.exe_path = current_process;
         args.read_key_path = multiproc_options.home;
-        args.write_key_path = multiproc_options.worker_home + "/" + args.name;
+        args.write_key_path = multiproc_options.worker_home + "/" + args.name_idx;
         args.so_home = option.so_home;
-        args.start_args = option.start_args;
         mkdir(multiproc_options.worker_home.c_str(), 0755);
         mkdir(args.write_key_path.c_str(), 0755);
 
@@ -245,75 +258,74 @@ namespace shm_multiproc
         id.name = option.name;
         WorkerProcess* worker = GetWorker(id);
         bool create_worker = false;
-        if(NULL == worker)
+        if (NULL == worker)
         {
-        	create_worker = true;
-        	worker = new WorkerProcess;
-        	worker->options = option;
-        	worker->id = id;
-        	worker->writer = new ShmFIFO(main_shm, args.name);
-        	worker->writer->OpenWrite(option.shm_fifo_maxsize);
+            create_worker = true;
+            worker = new WorkerProcess;
+            worker->options = option;
+            worker->id = id;
+            worker->writer = new ShmFIFO(main_shm, args.name_idx);
+            worker->writer->OpenWrite(option.shm_fifo_maxsize);
         }
-        if(NULL == worker->shm)
+        if (NULL == worker->shm)
         {
-        	worker->shm = new ShmData;
-        	ShmOpenOptions wshm_options;
-        	wshm_options.recreate = true;
-        	wshm_options.size = option.shm_size;
-        	if (0 != worker->shm->OpenShm(args.write_key_path, wshm_options))
-        	{
-        		  delete worker->shm;
-        		  worker->shm= NULL;
-        	      printf("OpenShm worker Error:%s\n", worker->shm->LastError().c_str());
-        	      if(create_worker)
-        	      {
-        	    	  delete worker->writer;
-        	    	  delete worker;
-        	      }
-        	      return;
-        	}
-        	worker->reader = new ShmFIFO(*(worker->shm), args.name);
-        	poller.AtttachReadFIFO(worker->reader);
+            worker->shm = new ShmData;
+            ShmOpenOptions wshm_options;
+            wshm_options.recreate = true;
+            wshm_options.size = option.shm_size;
+            if (0 != worker->shm->OpenShm(args.write_key_path, wshm_options))
+            {
+                delete worker->shm;
+                worker->shm = NULL;
+                printf("OpenShm worker Error:%s\n", worker->shm->LastError().c_str());
+                if (create_worker)
+                {
+                    delete worker->writer;
+                    delete worker;
+                }
+                return;
+            }
+            worker->reader = new ShmFIFO(*(worker->shm), args.name_idx);
+            poller.AtttachReadFIFO(worker->reader);
         }
 
         args.reader_eventfd = worker->writer->GetEventFD();
         args.writer_eventfd = worker->reader->GetEventFD();
-        worker->pid = createWorkerProcess(args.write_key_path, args);
+        worker->pid = createWorkerProcess(args.write_key_path, args, option.start_args, option.envs);
 
         pid_workers[worker->pid] = worker;
         workers[worker->id] = worker;
     }
-    void Master::GetWriters(const std::vector<WorkerId>& workers, ShmFIFOArrary& writers)
-    {
-        for (const auto& id : workers)
-        {
-            WorkerProcess* w = GetWorker(id);
-            if (NULL != w && NULL != w->writer)
-            {
-                writers.push_back(w->writer);
-            }
-        }
-    }
 
-    int Master::WriteToWorkers(const std::vector<WorkerId>& workers, google::protobuf::Message* msg)
+    int Master::WriteToWorkers(const std::vector<WorkerId>& workers, google::protobuf::Message* msg,
+            const WriteCallback& callback)
     {
+        if (workers.empty())
+        {
+            delete msg;
+            return -1;
+        }
         const shm_proto::ShmProtoFunctors* funcs = shm_proto::ShmProtoFactory::GetInstance().GetShmFunctors(
                 msg->GetTypeName());
         auto write_func =
                 [=]()
                 {
-                    ShmFIFOArrary writers;
-                    GetWriters(workers, writers);
-                    if(writers.size() == 0)
-                    {
-                    	return;
-                    }
                     TypeRefItemPtr ref = main_shm.NewTypeRefItem(msg->GetTypeName(), funcs->Create, funcs->Destroy, workers.size());
                     funcs->Read(ref.get()->val.get(), msg);
                     delete msg;
-                    for(auto writer:writers)
+                    for(auto worker:workers)
                     {
-                        if(0 != writer->Offer(ref))
+                        int err = 0;
+                        WorkerProcess* w = GetWorker(worker);
+                        if(NULL == w || NULL == w->writer)
+                        {
+                            err = -1;
+                        }
+                        else
+                        {
+                            err = w->writer->Offer(ref);
+                        }
+                        if(0 != err)
                         {
                             //printf("####Writer to worker failed.\n");
                             if(0 == ref->DecRef())
@@ -321,6 +333,7 @@ namespace shm_multiproc
                                 main_shm.Delete(ref);
                             }
                         }
+                        callback(worker, err);
                     }
 
                 };
@@ -328,21 +341,10 @@ namespace shm_multiproc
         return 0;
     }
 
-    void Master::StopWorker(const WorkerId& id, int sig)
+    int Master::WriteToWorker(const WorkerId& worker, google::protobuf::Message* msg, const WriteCallback& callback)
     {
-        WorkerProcess* w = GetWorker(id);
-        if (NULL != w)
-        {
-
-            kill(w->pid, sig);
-        }
+        return WriteToWorkers(std::vector<WorkerId>(1, worker), msg, callback);
     }
-
-    int Master::WriteToWorker(const WorkerId& worker, google::protobuf::Message* msg)
-    {
-        return WriteToWorkers(std::vector<WorkerId>(1, worker), msg);
-    }
-
 
     static std::string real_path(const std::string& path)
     {
@@ -385,8 +387,16 @@ namespace shm_multiproc
             if(NULL != w)
             {
                 WorkerOptions options = w->options;
+                WorkerId wid = w->id;
                 int idx = w->id.idx;
                 DestoryWorker(w);
+                if(workers.count(wid) == 0)
+                {
+                    close(w->writer->GetEventFD());
+                    delete w->writer;
+                    delete w;
+                    return;
+                }
                 WorkerRestartOptions r;
                 r.opt = options;
                 r.idx = idx;
@@ -396,7 +406,24 @@ namespace shm_multiproc
         };
         poller.Wake(func);
     }
+    int Master::Kill(const WorkerId& id, int sig, bool restart)
+    {
+        auto func = [=]()
+        {
+            WorkerProcess* w = GetWorker(id);
+            if(NULL != w)
+            {
+                if(0 != sig && !restart)
+                {
+                    workers.erase(id);
+                }
+                kill(w->pid, sig);
 
+            }
+        };
+        poller.Wake(func);
+        return 0;
+    }
 
     int Master::Start(int argc, const char** argv, const MultiProcOptions& options)
     {
@@ -409,11 +436,10 @@ namespace shm_multiproc
         main_options.size = multiproc_options.main_shm_size;
         if (0 != main_shm.OpenShm(multiproc_options.home.c_str(), main_options))
         {
-        	error_reason = "Open main shm error:"  + main_shm.LastError();
+            error_reason = "Open main shm error:" + main_shm.LastError();
             return -1;
         }
         poller.Init();
-
 
         struct sigaction action;
         action.sa_sigaction = handle_worker_exit;
@@ -432,13 +458,24 @@ namespace shm_multiproc
     }
     int Master::Routine(const ConsumeFunction& func)
     {
+        auto func_with_done = [=](const char* type, const void* data, DoneFunc done)
+        {
+            func(type, data);
+            done();
+            return 0;
+        };
+        return Routine(func_with_done);
+    }
+    int Master::Routine(const ConsumeDoneFunction& func)
+    {
         int n = poller.Poll(func, multiproc_options.max_waitms);
         RestartWorkers();
         return n;
     }
 
     Worker::Worker()
-            : reader(NULL), writer(NULL), entry_func(NULL), so_handler(NULL), last_check_parent_ms(0),last_check_so(0)
+            : reader(NULL), writer(NULL), entry_func(NULL), init_func(NULL), destroy_func(NULL), so_handler(NULL), last_check_parent_ms(
+                    0), last_check_so(0)
     {
 
     }
@@ -449,7 +486,7 @@ namespace shm_multiproc
             last_check_parent_ms = now;
             if (getppid() == 1)
             {
-            	fprintf(stderr, "Exit since parent exit.\n");
+                fprintf(stderr, "Exit since parent exit.\n");
                 exit(1);
             }
         }
@@ -458,67 +495,71 @@ namespace shm_multiproc
     {
         if (now - last_check_so >= 5000)
         {
-        	last_check_so = now;
+            last_check_so = now;
             std::vector<std::string> libs;
             std::string latest_so;
-            list_solibs(so_home,libs, latest_so);
-            if(latest_so != loaded_so)
+            list_solibs(so_home, libs, latest_so);
+            if (latest_so != loaded_so)
             {
-            	fprintf(stderr, "Exit since loaded so is not latest so.\n");
-            	exit(1);
+                fprintf(stderr, "Exit since loaded so is not latest so.\n");
+                exit(1);
             }
         }
-
     }
 
     int Worker::Start(int argc, const char** argv)
     {
-    	error_reason.clear();
+        error_reason.clear();
         WorkerStartArgs args;
         if (!kcfg::ParseFromJsonFile(argv[argc - 1], args))
         {
-        	error_reason.append("ParseFromJsonFile Error:").append(argv[argc - 1]);
+            error_reason.append("ParseFromJsonFile Error:").append(argv[argc - 1]);
             return -1;
         }
-        if(args.so_home.empty())
+        if (args.so_home.empty())
         {
-        	return -1;
+            return -1;
         }
+        id.name = args.name;
+        id.idx = args.idx;
         so_home = args.so_home;
         std::vector<std::string> libs;
         std::string latest_so;
-        list_solibs(args.so_home,libs, latest_so);
-        if(latest_so.empty())
+        list_solibs(args.so_home, libs, latest_so);
+        if (latest_so.empty())
         {
-        	error_reason.append("No so found in so_home:").append(dlerror());
-        	return -1;
+            error_reason.append("No so found in so_home:").append(args.so_home);
+            return -1;
         }
 
         so_handler = dlopen(latest_so.c_str(), RTLD_NOW);
-        if(NULL == so_handler)
+        if (NULL == so_handler)
         {
-             error_reason.append("dlopen error:").append(dlerror());
-             return -1;
+            error_reason.append("dlopen error:").append(dlerror());
+            return -1;
         }
         loaded_so = latest_so;
-        if(WorkerEntryFactory::GetInstance().Size() != 1)
+
+        entry_func = WorkerEntryFactory::GetInstance().GetEntry();
+        if (NULL == entry_func)
         {
-        	std::stringstream name_ss;
-        	name_ss << "Only ONE worker entry method expected, but got " << WorkerEntryFactory::GetInstance().Size();
-        	error_reason = name_ss.str();
-        	return -1;
+            std::stringstream name_ss;
+            name_ss << "'OnMessageEntry' entry func expected, but got nothing.";
+            error_reason = name_ss.str();
+            return -1;
         }
-        entry_func = WorkerEntryFactory::GetInstance().First();
+        init_func = (OnInit*) WorkerEntryFactory::GetInstance().GetInit();
+        destroy_func = (OnInit*) WorkerEntryFactory::GetInstance().GetDestroy();
 
         ShmOpenOptions reader_shm_options;
         reader_shm_options.readonly = true;
         reader_shm_options.recreate = false;
         if (0 != reader_shm.OpenShm(args.read_key_path, reader_shm_options))
         {
-        	error_reason = "Open worker read shm  error:" + reader_shm.LastError();
+            error_reason = "Open worker read shm  error:" + reader_shm.LastError();
             return -1;
         }
-        reader = new ShmFIFO(reader_shm, args.name, args.reader_eventfd);
+        reader = new ShmFIFO(reader_shm, args.name_idx, args.reader_eventfd);
         reader->OpenRead();
 
         ShmOpenOptions wshm_options;
@@ -527,28 +568,67 @@ namespace shm_multiproc
         wshm_options.size = args.shm_size;
         if (0 != writer_shm.OpenShm(args.write_key_path, wshm_options))
         {
-        	error_reason = "Open worker write shm  error:" + writer_shm.LastError();
+            error_reason = "Open worker write shm  error:" + writer_shm.LastError();
             return -1;
         }
-        writer = new ShmFIFO(writer_shm, args.name, args.writer_eventfd);
+        poller.Init();
+        poller.AtttachReadFIFO(reader);
+        writer = new ShmFIFO(writer_shm, args.name_idx, args.writer_eventfd);
         writer->OpenWrite(args.fifo_maxsize, true);
         writer->NotifyReader();
+
+        if (NULL != init_func)
+        {
+            WorkerObj w(id, *writer, poller);
+            int ret = init_func(w);
+            if (0 != ret)
+            {
+                return ret;
+            }
+        }
         //printf("Worker shm size:%d\n", writer->Capacity());
+        return 0;
+    }
+
+    int Worker::Routine(const ConsumeFunction& func, int64_t maxwait_ms)
+    {
+        auto func_with_done = [=](const char* type, const void* data, DoneFunc done)
+        {
+            func(type, data);
+            done();
+            return 0;
+        };
+        return Routine(func_with_done, maxwait_ms);
+    }
+
+    int Worker::Routine(const ConsumeDoneFunction& func, int maxwait)
+    {
+        poller.Poll(func, maxwait);
+        writer->TryNotifyReader();
+        uint64_t now = mstime();
+        CheckParent(now);
+        //CheckLatestLib(now);
         return 0;
     }
 
     int Worker::Routine(int maxwait)
     {
-        auto consume = [this](const char* type, const void* data)
+        auto consume = [this](const char* type, const void* data, DoneFunc done)
         {
-            entry_func(*writer, type, data);
+            WorkerObj w(id, *writer, poller);
+            entry_func(w, type, data);
+            done();
             return 0;
         };
-        reader->TakeOne(consume, maxwait);
-        writer->TryNotifyReader();
-        uint64_t now = mstime();
-        CheckParent(now);
-        CheckLatestLib(now);
+        return Routine(consume, maxwait);
+    }
+    int Worker::Stop()
+    {
+        if (NULL != destroy_func)
+        {
+            WorkerObj w(id, *writer, poller);
+            return destroy_func(w);
+        }
         return 0;
     }
 }

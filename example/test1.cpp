@@ -37,7 +37,7 @@ static void start_master(int argc, const char** argv)
     MultiProcOptions options;
     options.home = "./";
     options.worker_home = "./";
-    options.max_waitms = 1500;
+    options.max_waitms = 1000;
 
     WorkerOptions worker;
     worker.name = "test_worker";
@@ -85,9 +85,13 @@ static void start_master(int argc, const char** argv)
             id.idx = i;
             workers.push_back(id);
         }
+        auto write_callback = [](const WorkerId& w, int err){
+
+        };
         std::cout << "##Main writer shm used:" << master.GetMainShm().GetAllocator().used_space() << std::endl;
-        master.WriteToWorkers(workers, dv);
+        master.WriteToWorkers(workers, dv, write_callback);
         master.Routine(consume);
+
     }
 }
 

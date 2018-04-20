@@ -35,6 +35,9 @@
 #include <unistd.h>
 #include <functional>
 #include <string.h>
+#include <map>
+#include <deque>
+#include <atomic>
 
 #define ERR_SHMFIFO_OVERLOAD -1000
 
@@ -75,33 +78,34 @@ namespace shm_multiproc
                 return val.get()->DecRef();
             }
     };
-    struct ShmFIFORingBuffer:public SHMVector<ShmFIFORefItem>::Type
-	{
-    	volatile size_t consume_idx;
-    	size_t produce_idx;
-    	size_t cleaned_idx;
-    	ShmFIFORingBuffer(const CharAllocator& alloc):SHMVector<ShmFIFORefItem>::Type(alloc),consume_idx(0),produce_idx(0),cleaned_idx(0)
-    	{
+    struct ShmFIFORingBuffer: public SHMVector<ShmFIFORefItem>::Type
+    {
+            volatile size_t consume_idx;
+            size_t produce_idx;
+            size_t cleaned_idx;
+            ShmFIFORingBuffer(const CharAllocator& alloc)
+                    : SHMVector<ShmFIFORefItem>::Type(alloc), consume_idx(0), produce_idx(0), cleaned_idx(0)
+            {
 
-    	}
-
-	};
+            }
+    };
+    class ShmFIFO;
+    typedef std::function<void(void)> DoneFunc;
     typedef std::function<int(const char*, const void*)> ConsumeFunction;
+    typedef std::function<int(const char*, const void*, DoneFunc)> ConsumeDoneFunction;
     class ShmFIFO
     {
         private:
             MMData& shm_data;
             int eventfd_desc;
-            //typedef typename SHMVector<ShmFIFORefItem>::Type DataVector;
             typedef boost::interprocess::offset_ptr<ShmFIFORingBuffer> ShmFIFORingBufferPtr;
             ShmFIFORingBuffer* data;
-            //size_t consume_offset;
-            //size_t produce_offset;
             std::string name;
             int64_t last_notify_write_ms;
             int64_t min_notify_interval_ms;
+            int64_t write_event_counter;
         private:
-            int consumeItem(const ConsumeFunction& cb, int& counter, int max);
+            int consumeItem(const ConsumeDoneFunction& cb, int& counter, int max);
             void notifyReader(int64_t now = 0);
             void tryCleanConsumedItems();
         public:
@@ -128,8 +132,8 @@ namespace shm_multiproc
             int OpenWrite(int maxsize, bool resize = true);
             int OpenRead();
             int Offer(TypeRefItemPtr val);
-            int Take(const ConsumeFunction& cb, int max = -1, int timeout = -1);
-            int TakeOne(const ConsumeFunction& cb, int timeout = -1);
+            int Take(const ConsumeDoneFunction& cb, int max = -1, int timeout = -1);
+            int TakeOne(const ConsumeDoneFunction& cb, int timeout = -1);
             int Capacity();
 
             template<typename T>
@@ -138,7 +142,7 @@ namespace shm_multiproc
                 return shm_data.New<T>();
             }
             template<typename T>
-            void Offer(T* v)
+            int Offer(T* v)
             {
                 TypeRefItemPtr ptr = shm_data.New<TypeRefItem>();
                 ptr->destroy = SHMDataDestructor<T>::Free;
@@ -146,36 +150,59 @@ namespace shm_multiproc
                 ptr->ref = 1;
                 const char* type_name = T::GetTypeName();
                 ptr->type.assign(type_name, strlen(type_name));
-                if(0 != Offer(ptr))
+                int err = Offer(ptr);
+                if (0 != err)
                 {
-                    printf("###Offer failed\n");
                     shm_data.Delete(ptr);
+                    return -1;
                 }
+                return err;
             }
-
     };
 
     typedef std::vector<ShmFIFO*> ShmFIFOArrary;
     typedef std::function<void(void)> WakeFunction;
-
+    typedef std::function<void(void)> TimerFunc;
     class ShmFIFOPoller
     {
         private:
             int epoll_fd;
             HeapMMData wake_mdata;
             ShmFIFO* wake_queue;
+            struct TimerTask
+            {
+                    TimerFunc func;
+                    uint64_t after_ms;
+                    uint64_t id;
+                    bool repeate;
+                    bool canceled;
+                    TimerTask()
+                            : after_ms(0),id(0),repeate(false),canceled(false)
+                    {
+                    }
+            };
+            typedef std::deque<TimerTask*> TimerTaskQueue;
+            typedef std::map<uint64_t, TimerTaskQueue> TimerTaskQueueTable;
+            typedef std::map<uint64_t, TimerTask*> TimerTaskTable;
+            TimerTaskQueueTable timer_task_queue;
+            TimerTaskTable timer_tasks;
+            uint64_t nearest_timertask_interval;
+            std::atomic<std::uint64_t> timer_task_id_seed;
             void DoWake(bool readev);
+            uint64_t TriggerExpiredTimerTasks();
         public:
             ShmFIFOPoller();
             int Init();
-            int Poll(const ConsumeFunction& func, int64_t maxwait_ms = 5);
+            int Poll(const ConsumeDoneFunction& func, int64_t maxwait_ms = 5);
+
             int Wake(const WakeFunction& func);
             void AtttachReadFIFO(ShmFIFO* fifo);
             void DettachReadFIFO(ShmFIFO* fifo);
-//            ShmFIFO* NewReadFIFO(MMData& mdata, const std::string& name, int evfd);
+            void AttachEventFD(int fd, const WakeFunction& func);
+            uint64_t AddTimerTask(const TimerFunc& func, uint64_t after_ms, bool repeate = false);
+            void CancelTimerTask(uint64_t id);
             int Write(ShmFIFO* write_fifo, TypeRefItemPtr val);
             int WriteAll(const ShmFIFOArrary& fifos, TypeRefItemPtr val);
-            int DeleteReadFIFO(ShmFIFO* f);
     };
 
     long long mstime(void);

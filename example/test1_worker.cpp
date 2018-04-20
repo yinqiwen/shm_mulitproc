@@ -33,19 +33,25 @@
 #include <iostream>
 using namespace shm_multiproc;
 
-DEFINE_ENTRY(test, writer, type, data)
+DEFINE_INIT(worker)
+{
+    printf("init called\n");
+    return 0;
+}
+
+DEFINE_ENTRY(worker, type, data)
 {
     if (0 != strcmp(type, helloworld::ShmHelloTestData::GetTypeName()))
     {
         return -1;
     }
     const helloworld::ShmHelloTestData* t = (const helloworld::ShmHelloTestData*) data;
-    //std::cout << "Recv From Master:" << *t << std::endl;
-    std::cout << "##Writer shm used:" << writer.GetMMData().GetAllocator().used_space() << std::endl;
-
-    helloworld::ShmHelloTestData* item = writer.New<helloworld::ShmHelloTestData>();
-    item->sv.assign("FromWorker");
-    writer.Offer(item);
+    std::cout << "Recv From Master:" << *t << std::endl;
+//    std::cout << "##Writer shm used:" << worker.writer.GetMMData().GetAllocator().used_space() << std::endl;
+//
+//    helloworld::ShmHelloTestData* item = worker.writer.New<helloworld::ShmHelloTestData>();
+//    item->sv.assign("FromWorker");
+//    worker.writer.Offer(item);
     return 0;
 }
 

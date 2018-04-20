@@ -37,13 +37,36 @@ namespace shm_multiproc
     class WorkerEntryFactory
     {
         private:
-            std::map<std::string, OnMessage*> func_table;
+            OnMessage* entry_func;
+            OnInit* init_func;
+            OnDestroy* destroy_func;
             WorkerEntryFactory();
         public:
-            void Add(const char* name, OnMessage* func);
-            OnMessage* Get(const char* name);
-            OnMessage* First();
-            int Size();
+            void SetEntry(OnMessage* func)
+            {
+                printf("###Set entry %p\n", func);
+                entry_func = func;
+            }
+            void SetInit(OnInit* func)
+            {
+                init_func = func;
+            }
+            void SetDestroy(OnDestroy* func)
+            {
+                destroy_func = func;
+            }
+            OnMessage* GetEntry()
+            {
+                return entry_func;
+            }
+            OnInit* GetInit()
+            {
+                return init_func;
+            }
+            OnDestroy* GetDestroy()
+            {
+                return destroy_func;
+            }
             static WorkerEntryFactory& GetInstance();
     };
 }

@@ -34,40 +34,16 @@ namespace shm_multiproc
 
     WorkerEntryFactory& WorkerEntryFactory::GetInstance()
     {
-        if(NULL == g_instance)
+        if (NULL == g_instance)
         {
             g_instance = new WorkerEntryFactory;
         }
         return *g_instance;
     }
     WorkerEntryFactory::WorkerEntryFactory()
+            : entry_func(NULL), init_func(NULL), destroy_func(NULL)
     {
     }
-    void WorkerEntryFactory::Add(const char* name, OnMessage* func)
-    {
-        func_table[name] = func;
-    }
-    OnMessage* WorkerEntryFactory::Get(const char* name)
-    {
-        auto found = func_table.find(name);
-        if (found != func_table.end())
-        {
-            return found->second;
-        }
-        return NULL;
-    }
-    OnMessage* WorkerEntryFactory::First()
-    {
-        auto begin = func_table.begin();
-        if (begin != func_table.end())
-        {
-            return begin->second;
-        }
-        return NULL;
-    }
-    int WorkerEntryFactory::Size()
-    {
-        return func_table.size();
-    }
+
 }
 

@@ -33,17 +33,49 @@
 
 namespace shm_multiproc
 {
-    typedef int OnMessage(shm_multiproc::ShmFIFO& writer, const char* type, const void* data);
+    struct WorkerId
+    {
+            std::string name;
+            int idx;
+            WorkerId()
+                    : idx(0)
+            {
+            }
+            bool operator<(const WorkerId& other) const
+            {
+                if (idx == other.idx)
+                {
+                    return name < other.name;
+                }
+                return idx < other.idx;
+            }
+    };
+    struct WorkerObj
+    {
+            const WorkerId& id;
+            ShmFIFO& writer;
+            ShmFIFOPoller& poller;
+            WorkerObj(const WorkerId& wid, ShmFIFO& f, ShmFIFOPoller& p);
+    };
+    typedef int OnMessage(shm_multiproc::WorkerObj& worker, const char* type, const void* data);
+    typedef int OnInit(shm_multiproc::WorkerObj& worker);
+    typedef int OnDestroy(shm_multiproc::WorkerObj& worker);
     class EntryFuncRegister
     {
         public:
-            EntryFuncRegister(const char* name, OnMessage* func);
+            EntryFuncRegister(OnMessage* func);
+            EntryFuncRegister(OnInit* func, bool is_init);
     };
 }
 
-#define DEFINE_ENTRY(NAME, writer, type, data)   static int Entry##NAME##Execute(shm_multiproc::ShmFIFO& writer, const char* type, const void* data);\
-                       static shm_multiproc::EntryFuncRegister instance(#NAME, Entry##NAME##Execute);\
-                       static int Entry##NAME##Execute(shm_multiproc::ShmFIFO& writer, const char* type, const void* data)
-
+#define DEFINE_ENTRY(worker, type, data)   static int OnMessageExecute(shm_multiproc::WorkerObj& worker, const char* type, const void* data);\
+                       static shm_multiproc::EntryFuncRegister entry_instance(OnMessageExecute);\
+                       static int OnMessageExecute(shm_multiproc::WorkerObj& worker, const char* type, const void* data)
+#define DEFINE_INIT(worker)   static int OnInitExecute(shm_multiproc::WorkerObj& worker);\
+                       static shm_multiproc::EntryFuncRegister init_instance(OnInitExecute, true);\
+                       static int OnInitExecute(shm_multiproc::WorkerObj& worker)
+#define DEFINE_DESTROY(worker)   static int OnDestroyExecute(shm_multiproc::WorkerObj& worker);\
+                       static shm_multiproc::EntryFuncRegister destroy_instance(OnDestroyExecute, false);\
+                       static int OnDestroyExecute(shm_multiproc::WorkerObj& worker)
 
 #endif /* WORKER_H_ */

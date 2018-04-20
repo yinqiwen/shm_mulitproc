@@ -32,10 +32,25 @@
 
 namespace shm_multiproc
 {
-
-    EntryFuncRegister::EntryFuncRegister(const char* name, OnMessage* func)
+    WorkerObj::WorkerObj(const WorkerId& wid, ShmFIFO& f, ShmFIFOPoller& p)
+            : id(wid), writer(f), poller(p)
     {
-        WorkerEntryFactory::GetInstance().Add(name, func);
+    }
+    EntryFuncRegister::EntryFuncRegister(OnMessage* func)
+    {
+        WorkerEntryFactory::GetInstance().SetEntry(func);
+    }
+    EntryFuncRegister::EntryFuncRegister(OnInit* func, bool is_init)
+    {
+        if (is_init)
+        {
+            WorkerEntryFactory::GetInstance().SetInit(func);
+        }
+        else
+        {
+            WorkerEntryFactory::GetInstance().SetDestroy(func);
+        }
+
     }
 }
 

@@ -49,6 +49,7 @@ namespace shm_multiproc
             int shm_size;
             int shm_fifo_maxsize;
             std::vector<std::string> start_args;
+            std::vector<std::string> envs;
             std::string so_home;
 
             WorkerOptions()
@@ -80,24 +81,7 @@ namespace shm_multiproc
             }
     };
 
-    struct WorkerId
-    {
-            std::string name;
-            int idx;
-            WorkerId()
-                    : idx(0)
-            {
-            }
-            bool operator<(const WorkerId& other) const
-            {
-                if (idx == other.idx)
-                {
-                    return name < other.name;
-                }
-                return idx < other.idx;
-            }
-    };
-
+    typedef std::function<void(const WorkerId&, int)> WriteCallback;
     class WorkerProcess;
     class Master
     {
@@ -123,23 +107,28 @@ namespace shm_multiproc
             void DestoryWorker(WorkerProcess* w);
             WorkerProcess* GetWorker(pid_t pid);
             WorkerProcess* GetWorker(const WorkerId& id);
-            void GetWriters(const std::vector<WorkerId>& workers, ShmFIFOArrary& writers);
         public:
             Master();
             ShmData& GetMainShm()
             {
                 return main_shm;
             }
+            ShmFIFOPoller& GetPoller()
+            {
+                return poller;
+            }
             int UpdateOptions(const MultiProcOptions& options);
             int Start(int argc, const char** argcv, const MultiProcOptions& options);
-            void StopWorker(const WorkerId& worker, int sig = 3);
             void RestartWorker(pid_t pid, int after_ms = 1000);
-            int WriteToWorker(const WorkerId& worker,google::protobuf::Message* msg);
-            int WriteToWorkers(const std::vector<WorkerId>& workers, google::protobuf::Message* msg);
+            int WriteToWorker(const WorkerId& worker, google::protobuf::Message* msg, const WriteCallback& callback);
+            int WriteToWorkers(const std::vector<WorkerId>& workers, google::protobuf::Message* msg,
+                    const WriteCallback& callback);
+            int Routine(const ConsumeDoneFunction& func);
             int Routine(const ConsumeFunction& func);
+            int Kill(const WorkerId& id, int sig, bool restart);
             const std::string& LastError() const
             {
-            	return error_reason;
+                return error_reason;
             }
 
     };
@@ -151,24 +140,50 @@ namespace shm_multiproc
             ShmFIFO* reader;
             ShmFIFO* writer;
             OnMessage* entry_func;
+            OnInit* init_func;
+            OnDestroy* destroy_func;
             void* so_handler;
             uint64_t last_check_parent_ms;
             uint64_t last_check_so;
             std::string error_reason;
             std::string so_home;
             std::string loaded_so;
+            ShmFIFOPoller poller;
+            WorkerId id;
             void CheckParent(uint64_t now);
             void CheckLatestLib(uint64_t now);
         public:
             Worker();
             int Start(int argc, const char** argcv);
             int Routine(int maxwait = 5);
+            int Routine(const ConsumeDoneFunction& func, int maxwait = 5);
+            int Routine(const ConsumeFunction& func, int64_t maxwait_ms = 5);
+            OnMessage* GetEntryFunc()
+            {
+                return entry_func;
+            }
+            void SetEntryFunc(OnMessage* entry)
+            {
+                entry_func = entry;
+            }
+            const WorkerId& GetId() const
+            {
+                return id;
+            }
+            ShmFIFO& GetWriter()
+            {
+                return *writer;
+            }
+            ShmFIFOPoller& GetPoller()
+            {
+                return poller;
+            }
             const std::string& LastError() const
             {
-            	return error_reason;
+                return error_reason;
             }
+            int Stop();
     };
-
 
 }
 
