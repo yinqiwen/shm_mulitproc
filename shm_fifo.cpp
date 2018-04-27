@@ -73,7 +73,8 @@ namespace shm_multiproc
     }
 
     ShmFIFO::ShmFIFO(MMData& mm, const std::string& nm, int efd)
-            : shm_data(mm), eventfd_desc(efd), data(NULL), name(nm), last_notify_write_ms(0), min_notify_interval_ms(10),write_event_counter(0)
+            : shm_data(mm), eventfd_desc(efd), data(NULL), name(nm), last_notify_write_ms(0), min_notify_interval_ms(
+                    10), write_event_counter(0)
     {
         if (-1 == eventfd_desc)
         {
@@ -96,9 +97,10 @@ namespace shm_multiproc
         {
             return kConsumeFail;
         }
-        auto done = [&item]()
+        size_t data_idx = data->consume_idx;
+        auto done = [this, data_idx]()
         {
-            item.status = SHMITEM_STATUS_CONSUMED;
+            (this->data->at(data_idx)).status = SHMITEM_STATUS_CONSUMED;
         };
         //data->consumed_seq = item.Seq();
         cb(item.GetType(), item.Get(), done);
@@ -117,7 +119,7 @@ namespace shm_multiproc
     }
     void ShmFIFO::NotifyReader(int64_t now)
     {
-        if(write_event_counter > 0)
+        if (write_event_counter > 0)
         {
             write(eventfd_desc, &write_event_counter, 8);
             write_event_counter = 0;
@@ -131,7 +133,8 @@ namespace shm_multiproc
     void ShmFIFO::TryNotifyReader()
     {
         int64_t now = mstime();
-        if (write_event_counter >= 100 || 0 == min_notify_interval_ms || now - last_notify_write_ms >= min_notify_interval_ms)
+        if (write_event_counter >= 100 || 0 == min_notify_interval_ms
+                || now - last_notify_write_ms >= min_notify_interval_ms)
         {
             NotifyReader(now);
         }
@@ -153,8 +156,32 @@ namespace shm_multiproc
         {
             return -1;
         }
-        //printf("OpenRead offset at %d %d\n", data->consume_idx, data->size());
+        size_t idx = data->cleaned_idx;
+        while (idx != data->consume_idx)
+        {
+            ShmFIFORefItem& item = data->at(idx);
+            if (item.status == SHMITEM_STATUS_INIT)
+            {
+                data->consume_idx = idx;
+                break;
+            }
+            idx++;
+            if (idx >= data->size())
+            {
+                idx = 0;
+            }
+        }
         return 0;
+    }
+
+    int ShmFIFO::DataStatus(size_t idx)
+    {
+        if (idx >= data->size())
+        {
+            return -1;
+        }
+        ShmFIFORefItem& item = data->at(idx);
+        return (int) item.status;
     }
     void ShmFIFO::tryCleanConsumedItems()
     {
@@ -305,6 +332,12 @@ namespace shm_multiproc
         wake_queue = new ShmFIFO(wake_mdata, "");
         wake_queue->OpenWrite(100000);
 
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_DEFAULT);
+        pthread_mutex_init(&wake_queue_mutex, &attr);
+        pthread_mutexattr_destroy(&attr);
+
         make_nonblocking(wake_queue->GetEventFD());
         struct epoll_event ev;
         ev.events = EPOLLIN;
@@ -319,7 +352,9 @@ namespace shm_multiproc
     int ShmFIFOPoller::Wake(const WakeFunction& func)
     {
         TypeRefItemPtr val = wake_mdata.NewTypeRefItemWithArg<WakeFunction, WakeFunction>("", func);
+        pthread_mutex_lock(&wake_queue_mutex);
         wake_queue->Offer(val);
+        pthread_mutex_unlock(&wake_queue_mutex);
         return 0;
     }
 
@@ -373,7 +408,7 @@ namespace shm_multiproc
                     : ShmFIFO(mm, nm, efd)
             {
             }
-            virtual int Take(const ConsumeDoneFunction& cb, int max = -1, int timeout = -1)
+            int Take(const ConsumeDoneFunction& cb, int max = -1, int timeout = -1)
             {
                 wake();
                 return 0;

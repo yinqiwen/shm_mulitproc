@@ -38,6 +38,7 @@
 #include <map>
 #include <deque>
 #include <atomic>
+#include <pthread.h>
 
 #define ERR_SHMFIFO_OVERLOAD -1000
 
@@ -129,10 +130,23 @@ namespace shm_multiproc
             {
                 return shm_data;
             }
+            size_t WriteIdx() const
+            {
+                return data->produce_idx;
+            }
+            size_t ReadIdx() const
+            {
+                return data->consume_idx;
+            }
+            size_t CleanIdx() const
+            {
+                return data->cleaned_idx;
+            }
+            int DataStatus(size_t idx);
             int OpenWrite(int maxsize, bool resize = true);
             int OpenRead();
             int Offer(TypeRefItemPtr val);
-            int Take(const ConsumeDoneFunction& cb, int max = -1, int timeout = -1);
+            virtual int Take(const ConsumeDoneFunction& cb, int max = -1, int timeout = -1);
             int TakeOne(const ConsumeDoneFunction& cb, int timeout = -1);
             int Capacity();
 
@@ -188,6 +202,7 @@ namespace shm_multiproc
             TimerTaskTable timer_tasks;
             uint64_t nearest_timertask_interval;
             std::atomic<std::uint64_t> timer_task_id_seed;
+            pthread_mutex_t wake_queue_mutex;
             void DoWake(bool readev);
             uint64_t TriggerExpiredTimerTasks();
         public:

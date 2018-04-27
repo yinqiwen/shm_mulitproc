@@ -50,7 +50,7 @@ namespace shm_multiproc
             int shm_fifo_maxsize;
             std::vector<std::string> start_args;
             std::vector<std::string> envs;
-            std::string so_home;
+            std::string so_path;
 
             WorkerOptions()
                     : count(1), shm_size(10 * 1024 * 1024), shm_fifo_maxsize(100000)
@@ -107,6 +107,9 @@ namespace shm_multiproc
             void DestoryWorker(WorkerProcess* w);
             WorkerProcess* GetWorker(pid_t pid);
             WorkerProcess* GetWorker(const WorkerId& id);
+
+        public:
+            pid_t GetWorkerPid(const WorkerId& id);
         public:
             Master();
             ShmData& GetMainShm()
@@ -117,6 +120,7 @@ namespace shm_multiproc
             {
                 return poller;
             }
+            ShmFIFO* GetWorkerWriter(const WorkerId& id);
             int UpdateOptions(const MultiProcOptions& options);
             int Start(int argc, const char** argcv, const MultiProcOptions& options);
             void RestartWorker(pid_t pid, int after_ms = 1000);
@@ -146,12 +150,10 @@ namespace shm_multiproc
             uint64_t last_check_parent_ms;
             uint64_t last_check_so;
             std::string error_reason;
-            std::string so_home;
-            std::string loaded_so;
+            std::string so_path;
             ShmFIFOPoller poller;
             WorkerId id;
             void CheckParent(uint64_t now);
-            void CheckLatestLib(uint64_t now);
         public:
             Worker();
             int Start(int argc, const char** argcv);

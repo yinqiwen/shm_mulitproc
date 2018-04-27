@@ -37,6 +37,8 @@
 #include <sstream>
 #include <stdlib.h>
 #include <dirent.h>
+#include "framework/common.h"
+//#include "servant/Application.h"
 
 namespace shm_multiproc
 {
@@ -53,8 +55,9 @@ namespace shm_multiproc
             int fifo_maxsize;
             std::string read_key_path;
             std::string write_key_path;
-            std::string so_home;
-            ;KCFG_DEFINE_FIELDS(exe_path, name,idx, name_idx, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so_home,fifo_maxsize,shm_size)
+            std::string so_path;
+
+            KCFG_DEFINE_FIELDS(exe_path, name,idx, name_idx, reader_eventfd,writer_eventfd,read_key_path,write_key_path,so_path,fifo_maxsize,shm_size)
     };
 
     struct WorkerProcess
@@ -105,55 +108,7 @@ namespace shm_multiproc
         }
         return pid;
     }
-    static bool has_suffix(const std::string& str, const std::string& suffix)
-    {
-        if (str.size() < suffix.size())
-        {
-            return false;
-        }
-        return str.rfind(suffix) == str.size() - suffix.size();
-    }
-    static int list_solibs(const std::string& path, std::vector<std::string>& libs, std::string& latest_lib)
-    {
-        struct stat buf;
-        int ret = stat(path.c_str(), &buf);
-        time_t max_last_modtime = 0;
-        if (0 == ret)
-        {
-            if (S_ISDIR(buf.st_mode))
-            {
-                DIR* dir = opendir(path.c_str());
-                if (NULL != dir)
-                {
-                    struct dirent * ptr;
-                    while ((ptr = readdir(dir)) != NULL)
-                    {
-                        if (!strcmp(ptr->d_name, ".") || !strcmp(ptr->d_name, ".."))
-                        {
-                            continue;
-                        }
-                        std::string file_path = path;
-                        file_path.append("/").append(ptr->d_name);
-                        memset(&buf, 0, sizeof(buf));
-                        ret = stat(file_path.c_str(), &buf);
-                        if (ret == 0 && S_ISREG(buf.st_mode) && has_suffix(file_path, ".so"))
-                        {
-                            libs.push_back(file_path);
-                            int64_t modtime = buf.st_mtime;
-                            if (modtime > max_last_modtime)
-                            {
-                                max_last_modtime = modtime;
-                                latest_lib = file_path;
-                            }
-                        }
-                    }
-                    closedir(dir);
-                    return 0;
-                }
-            }
-        }
-        return -1;
-    }
+
     Master::Master()
             : last_check_restart_ms(0)
     {
@@ -191,6 +146,15 @@ namespace shm_multiproc
             return found->second;
         }
         return NULL;
+    }
+    pid_t Master::GetWorkerPid(const WorkerId& id)
+    {
+        WorkerProcess* w = GetWorker(id);
+        if (w == NULL)
+        {
+            return -1;
+        }
+        return w->pid;
     }
 
     void Master::RestartWorkers()
@@ -237,6 +201,7 @@ namespace shm_multiproc
 
     void Master::CreateWorker(const WorkerOptions& option, int idx)
     {
+        TAFSVR_DEBUG_ENDL("CreateWorker name:" << option.name);
         std::stringstream name_ss;
         name_ss << option.name << "_" << idx;
 
@@ -249,7 +214,7 @@ namespace shm_multiproc
         args.exe_path = current_process;
         args.read_key_path = multiproc_options.home;
         args.write_key_path = multiproc_options.worker_home + "/" + args.name_idx;
-        args.so_home = option.so_home;
+        args.so_path = option.so_path;
         mkdir(multiproc_options.worker_home.c_str(), 0755);
         mkdir(args.write_key_path.c_str(), 0755);
 
@@ -294,7 +259,10 @@ namespace shm_multiproc
         worker->pid = createWorkerProcess(args.write_key_path, args, option.start_args, option.envs);
 
         pid_workers[worker->pid] = worker;
-        workers[worker->id] = worker;
+        if(0 == workers.count(worker->id))
+        {
+            workers[worker->id] = worker;
+        }
     }
 
     int Master::WriteToWorkers(const std::vector<WorkerId>& workers, google::protobuf::Message* msg,
@@ -305,11 +273,11 @@ namespace shm_multiproc
             delete msg;
             return -1;
         }
-        const shm_proto::ShmProtoFunctors* funcs = shm_proto::ShmProtoFactory::GetInstance().GetShmFunctors(
-                msg->GetTypeName());
         auto write_func =
-                [=]()
+                [this, msg, workers, callback]()
                 {
+                    const shm_proto::ShmProtoFunctors* funcs = shm_proto::ShmProtoFactory::GetInstance().GetShmFunctors(
+                            msg->GetTypeName());
                     TypeRefItemPtr ref = main_shm.NewTypeRefItem(msg->GetTypeName(), funcs->Create, funcs->Destroy, workers.size());
                     funcs->Read(ref.get()->val.get(), msg);
                     delete msg;
@@ -337,8 +305,8 @@ namespace shm_multiproc
                     }
 
                 };
-        poller.Wake(write_func);
-        return 0;
+        int err = poller.Wake(write_func);
+        return err;
     }
 
     int Master::WriteToWorker(const WorkerId& worker, google::protobuf::Message* msg, const WriteCallback& callback)
@@ -390,13 +358,16 @@ namespace shm_multiproc
                 WorkerId wid = w->id;
                 int idx = w->id.idx;
                 DestoryWorker(w);
+                TAFSVR_DEBUG_ENDL("need restart worker:" << wid.name);
                 if(workers.count(wid) == 0)
                 {
+                    TAFSVR_DEBUG_ENDL("will delete worker:" << wid.name);
                     close(w->writer->GetEventFD());
                     delete w->writer;
                     delete w;
                     return;
                 }
+                TAFSVR_DEBUG_ENDL("will start worker:" << wid.name);
                 WorkerRestartOptions r;
                 r.opt = options;
                 r.idx = idx;
@@ -405,6 +376,15 @@ namespace shm_multiproc
             }
         };
         poller.Wake(func);
+    }
+    ShmFIFO* Master::GetWorkerWriter(const WorkerId& id)
+    {
+        WorkerProcess* w = GetWorker(id);
+        if(NULL != w)
+        {
+            return w->writer;
+        }
+        return NULL;
     }
     int Master::Kill(const WorkerId& id, int sig, bool restart)
     {
@@ -415,10 +395,10 @@ namespace shm_multiproc
             {
                 if(0 != sig && !restart)
                 {
+                    TAFSVR_DEBUG_ENDL("erase worker:" << id.name << " from list");
                     workers.erase(id);
                 }
                 kill(w->pid, sig);
-
             }
         };
         poller.Wake(func);
@@ -491,21 +471,6 @@ namespace shm_multiproc
             }
         }
     }
-    void Worker::CheckLatestLib(uint64_t now)
-    {
-        if (now - last_check_so >= 5000)
-        {
-            last_check_so = now;
-            std::vector<std::string> libs;
-            std::string latest_so;
-            list_solibs(so_home, libs, latest_so);
-            if (latest_so != loaded_so)
-            {
-                fprintf(stderr, "Exit since loaded so is not latest so.\n");
-                exit(1);
-            }
-        }
-    }
 
     int Worker::Start(int argc, const char** argv)
     {
@@ -516,29 +481,25 @@ namespace shm_multiproc
             error_reason.append("ParseFromJsonFile Error:").append(argv[argc - 1]);
             return -1;
         }
-        if (args.so_home.empty())
+        if (args.so_path.empty())
         {
             return -1;
         }
         id.name = args.name;
         id.idx = args.idx;
-        so_home = args.so_home;
-        std::vector<std::string> libs;
-        std::string latest_so;
-        list_solibs(args.so_home, libs, latest_so);
-        if (latest_so.empty())
+        so_path = args.so_path;
+
+        if (so_path.empty())
         {
-            error_reason.append("No so found in so_home:").append(args.so_home);
+            error_reason.append("No so found in so_path:").append(args.so_path);
             return -1;
         }
-
-        so_handler = dlopen(latest_so.c_str(), RTLD_NOW);
+        so_handler = dlopen(so_path.c_str(), RTLD_NOW);
         if (NULL == so_handler)
         {
-            error_reason.append("dlopen error:").append(dlerror());
+            error_reason.append("dlopen error:").append(dlerror()).append(" ").append(args.so_path);
             return -1;
         }
-        loaded_so = latest_so;
 
         entry_func = WorkerEntryFactory::GetInstance().GetEntry();
         if (NULL == entry_func)
