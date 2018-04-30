@@ -116,7 +116,7 @@ namespace shm_multiproc
             {
                 return eventfd_desc;
             }
-            void NotifyReader(int64_t now = 0);
+            void NotifyReader(int64_t now = 0, bool force = false);
             void TryNotifyReader();
             void SetMinNotifyIntervalMS(int64_t ms)
             {
@@ -132,14 +132,26 @@ namespace shm_multiproc
             }
             size_t WriteIdx() const
             {
+                if (NULL == data)
+                {
+                    return 0;
+                }
                 return data->produce_idx;
             }
             size_t ReadIdx() const
             {
+                if (NULL == data)
+                {
+                    return 0;
+                }
                 return data->consume_idx;
             }
             size_t CleanIdx() const
             {
+                if (NULL == data)
+                {
+                    return 0;
+                }
                 return data->cleaned_idx;
             }
             int DataStatus(size_t idx);
@@ -191,7 +203,7 @@ namespace shm_multiproc
                     bool repeate;
                     bool canceled;
                     TimerTask()
-                            : after_ms(0),id(0),repeate(false),canceled(false)
+                            : after_ms(0), id(0), repeate(false), canceled(false)
                     {
                     }
             };
@@ -218,6 +230,10 @@ namespace shm_multiproc
             void CancelTimerTask(uint64_t id);
             int Write(ShmFIFO* write_fifo, TypeRefItemPtr val);
             int WriteAll(const ShmFIFOArrary& fifos, TypeRefItemPtr val);
+            ShmFIFO* GetWakeQueue()
+            {
+                return wake_queue;
+            }
     };
 
     long long mstime(void);

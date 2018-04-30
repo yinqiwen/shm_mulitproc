@@ -93,6 +93,11 @@ namespace shm_multiproc
             return kConsumeFail;
         }
         ShmFIFORefItem& item = data->at(data->consume_idx);
+        if (item.status == SHMITEM_STATUS_CONSUMED)
+        {
+            data->consume_idx++;
+            return kConsumeContinue;
+        }
         if (item.status != SHMITEM_STATUS_INIT)
         {
             return kConsumeFail;
@@ -100,13 +105,16 @@ namespace shm_multiproc
         size_t data_idx = data->consume_idx;
         auto done = [this, data_idx]()
         {
-            (this->data->at(data_idx)).status = SHMITEM_STATUS_CONSUMED;
+            if(SHMITEM_STATUS_INIT == (this->data->at(data_idx)).status)
+            {
+                (this->data->at(data_idx)).status = SHMITEM_STATUS_CONSUMED;
+            }
         };
+        counter++;
+        data->consume_idx++;
         //data->consumed_seq = item.Seq();
         cb(item.GetType(), item.Get(), done);
 
-        counter++;
-        data->consume_idx++;
         if (max >= 0 && counter >= max)
         {
             return kConsumeExit;
@@ -117,18 +125,19 @@ namespace shm_multiproc
     {
         return data->size();
     }
-    void ShmFIFO::NotifyReader(int64_t now)
+    void ShmFIFO::NotifyReader(int64_t now,bool force)
     {
-        if (write_event_counter > 0)
+        if(write_event_counter > 0 || force)
         {
-            write(eventfd_desc, &write_event_counter, 8);
+            int64_t ev = 1;
+            write(eventfd_desc, &ev, 8);
             write_event_counter = 0;
+            if (0 == now)
+            {
+                now = mstime();
+            }
+            last_notify_write_ms = now;
         }
-        if (0 == now)
-        {
-            now = mstime();
-        }
-        last_notify_write_ms = now;
     }
     void ShmFIFO::TryNotifyReader()
     {
@@ -136,7 +145,7 @@ namespace shm_multiproc
         if (write_event_counter >= 100 || 0 == min_notify_interval_ms
                 || now - last_notify_write_ms >= min_notify_interval_ms)
         {
-            NotifyReader(now);
+            NotifyReader(now, now - last_notify_write_ms >= min_notify_interval_ms);
         }
     }
     int ShmFIFO::OpenWrite(int maxsize, bool resize)
@@ -176,7 +185,7 @@ namespace shm_multiproc
 
     int ShmFIFO::DataStatus(size_t idx)
     {
-        if (idx >= data->size())
+        if (NULL == data || idx >= data->size())
         {
             return -1;
         }
@@ -200,6 +209,7 @@ namespace shm_multiproc
             {
                 shm_data.Delete(item.val);
             }
+            item.val = NULL;
             item.status = SHMITEM_STATUS_CLEANED;
             data->cleaned_idx++;
         }
@@ -214,11 +224,11 @@ namespace shm_multiproc
         ShmFIFORefItem& item = data->at(data->produce_idx);
         if (item.status != SHMITEM_STATUS_CLEANED)
         {
-            NotifyReader();
+            TryNotifyReader();
             return ERR_SHMFIFO_OVERLOAD;
         }
-        item.status = SHMITEM_STATUS_INIT;
         item.val = val;
+        item.status = SHMITEM_STATUS_INIT;
         write_event_counter++;
         //printf("###[%d] offer offset  %llu  %s\n", getpid(), item.val.get_offset(), item.val->type.c_str());
         TryNotifyReader();
@@ -319,7 +329,7 @@ namespace shm_multiproc
         };
         while (1)
         {
-            int count = wake_queue->TakeOne(f, false);
+            int count = wake_queue->TakeOne(f, 0);
             if (count != 1)
             {
                 break;
