@@ -37,8 +37,6 @@
 #include <sstream>
 #include <stdlib.h>
 #include <dirent.h>
-#include "framework/common.h"
-//#include "servant/Application.h"
 
 namespace shm_multiproc
 {
@@ -201,7 +199,6 @@ namespace shm_multiproc
 
     void Master::CreateWorker(const WorkerOptions& option, int idx)
     {
-        TAFSVR_DEBUG_ENDL("CreateWorker name:" << option.name);
         std::stringstream name_ss;
         name_ss << option.name << "_" << idx;
 
@@ -358,16 +355,13 @@ namespace shm_multiproc
                 WorkerId wid = w->id;
                 int idx = w->id.idx;
                 DestoryWorker(w);
-                TAFSVR_DEBUG_ENDL("need restart worker:" << wid.name);
                 if(workers.count(wid) == 0)
                 {
-                    TAFSVR_DEBUG_ENDL("will delete worker:" << wid.name);
                     close(w->writer->GetEventFD());
                     delete w->writer;
                     delete w;
                     return;
                 }
-                TAFSVR_DEBUG_ENDL("will start worker:" << wid.name);
                 WorkerRestartOptions r;
                 r.opt = options;
                 r.idx = idx;
@@ -449,6 +443,11 @@ namespace shm_multiproc
     int Master::Routine(const ConsumeDoneFunction& func)
     {
         int n = poller.Poll(func, multiproc_options.max_waitms);
+        ShmFIFO* wake_fifo = poller.GetWakeQueue();
+        if(NULL != wake_fifo)
+        {
+        	wake_fifo->TryNotifyReader();
+        }
         RestartWorkers();
         return n;
     }
@@ -565,8 +564,8 @@ namespace shm_multiproc
     int Worker::Routine(const ConsumeDoneFunction& func, int maxwait)
     {
         poller.Poll(func, maxwait);
-        writer->TryNotifyReader();
         uint64_t now = mstime();
+        writer->TryNotifyReader(now);
         CheckParent(now);
         //CheckLatestLib(now);
         return 0;

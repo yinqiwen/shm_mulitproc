@@ -139,10 +139,13 @@ namespace shm_multiproc
             last_notify_write_ms = now;
         }
     }
-    void ShmFIFO::TryNotifyReader()
+    void ShmFIFO::TryNotifyReader(int64_t now)
     {
-        int64_t now = mstime();
-        if (write_event_counter >= 100 || 0 == min_notify_interval_ms
+    	if(0 == now)
+    	{
+    		now = mstime();
+    	}
+        if (write_event_counter >= 128 || 0 == min_notify_interval_ms
                 || now - last_notify_write_ms >= min_notify_interval_ms)
         {
             NotifyReader(now, now - last_notify_write_ms >= min_notify_interval_ms);
